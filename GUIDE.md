@@ -15,7 +15,7 @@
   <a href="#get-started">Install</a> ·
   <a href="#what-it-costs">What it costs</a> ·
   <a href="#faq">FAQ</a> ·
-  <a href="README.md">简体中文</a>
+  <a href="GUIDE.zh.md">简体中文</a>
 </p>
 
 <p align="center">

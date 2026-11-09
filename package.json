@@ -1,6 +1,6 @@
 {
-  "name": "dsh-media-desk",
-  "version": "2.6.2",
+  "name": "@winterhuan/dsh-media-desk",
+  "version": "2.6.2-winter.1",
   "description": "DeepSeek Harness 插件。一句话记灵感，一键成稿：口播脚本、标题、视频封面、配图和黑白线稿分镜。",
   "type": "module",
   "packageManager": "pnpm@11.7.0",
@@ -24,7 +24,7 @@
   },
   "engines": {
     "node": ">=20",
-    "dsh": ">=0.2.1-rc.5 <0.3.0"
+    "dsh": "0.2.2-rc.1"
   },
   "keywords": [
     "dsh",
@@ -40,11 +40,11 @@
   "bugs": "https://github.com/winterhuan/dsh-media-desk/issues",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "find src -name '*.js' -print0 | xargs -0 -n1 node --check",
+    "typecheck": "node scripts/check-syntax.mjs",
     "watch": "node scripts/build.mjs --watch",
     "test": "node --test test/*.test.js",
     "assets": "python3 scripts/gen-assets.py",
-    "prepack": "npm run build"
+    "clean": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\""
   },
   "devDependencies": {
     "esbuild": "^0.25.10"
@@ -55,6 +55,9 @@
     "assets",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "README.zh.md",
+    "GUIDE.md",
+    "GUIDE.zh.md"
   ]
 }

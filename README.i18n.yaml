@@ -1,0 +1,49 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write README.md
+/:
+  en: 8cb6d4bbc3539cbe
+  zh: 808dca1e0ae33d44
+/winterhuan-dsh-media-desk:
+  en: 2db07af5a1dca740
+  zh: 2ca863a3854c142e
+/winterhuan-dsh-media-desk/summary:
+  en: c4f80203e6eac80d
+  zh: 9bc2b08ec562e9f5
+/winterhuan-dsh-media-desk/table-of-contents:
+  en: d82a25774fdda2a7
+  zh: 74a5455dea14a89f
+/winterhuan-dsh-media-desk/use-this-package:
+  en: 8ef082c7efe8c963
+  zh: 9d9c0861407d8a33
+/winterhuan-dsh-media-desk/development:
+  en: 0c9c011c8034ebc2
+  zh: 53f140ddc3925ca6
+/winterhuan-dsh-media-desk/understand-the-implementation:
+  en: 300991b6224dca2c
+  zh: 31f0ba29c1614c86
+/winterhuan-dsh-media-desk/further-exploration:
+  en: 2bd3be0480372495
+  zh: 8187054a2bb73df4
+/winterhuan-dsh-media-desk/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/winterhuan-dsh-media-desk/model-experience/workbench-context:
+  en: e78c0259ebd4c505
+  zh: ee839162694e500d
+/winterhuan-dsh-media-desk/model-experience/workbench-context/what-the-model-sees:
+  en: a990e5ce92460b2c
+  zh: a9cbff9b022ebdc9
+/winterhuan-dsh-media-desk/model-experience/workbench-context/token-effect:
+  en: 46fecd19ae8be372
+  zh: cbf228ee665c2bc7
+/winterhuan-dsh-media-desk/model-experience/workbench-context/kv-cache-effect:
+  en: 9095df0a98b9f267
+  zh: 9e7f343181e1ed48
+/winterhuan-dsh-media-desk/known-limitations-and-deferred-work:
+  en: 87574daddb06ae3f
+  zh: 57ff01247ea28564
+/winterhuan-dsh-media-desk/known-limitations-and-deferred-work/dev-note:
+  en: 03bacc1ebfff19ec
+  zh: 381c77532a1e00d5
