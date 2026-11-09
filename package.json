@@ -3,6 +3,7 @@
   "version": "2.6.2",
   "description": "DeepSeek Harness 插件。一句话记灵感，一键成稿：口播脚本、标题、视频封面、配图和黑白线稿分镜。",
   "type": "module",
+  "packageManager": "pnpm@11.7.0",
   "main": "src/host.js",
   "exports": {
     ".": "./src/host.js",
@@ -33,12 +34,13 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/woniuniuniu/dsh-media-desk.git"
+    "url": "git+https://github.com/winterhuan/dsh-media-desk.git"
   },
-  "homepage": "https://github.com/woniuniuniu/dsh-media-desk#readme",
-  "bugs": "https://github.com/woniuniuniu/dsh-media-desk/issues",
+  "homepage": "https://github.com/winterhuan/dsh-media-desk#readme",
+  "bugs": "https://github.com/winterhuan/dsh-media-desk/issues",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "typecheck": "find src -name '*.js' -print0 | xargs -0 -n1 node --check",
     "watch": "node scripts/build.mjs --watch",
     "test": "node --test test/*.test.js",
     "assets": "python3 scripts/gen-assets.py",
