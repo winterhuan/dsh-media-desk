@@ -1,0 +1,8 @@
+# Bilingual glossary record computed with the parent repository pairing helpers.
+# GLOSSARY.md is outside the current verify-translation-pairing CLI corpus.
+/media-desk:
+  en: d0bbdab03064ffbe
+  zh: 715dab22c2b0279b
+/media-desk/language:
+  en: cdc2874184c390f0
+  zh: 6132e00e2df0eaa1
