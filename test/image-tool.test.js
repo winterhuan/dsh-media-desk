@@ -7,7 +7,7 @@ import { imageTool, generateToolImage } from '../src/image-tool.js'
 import { imageReady, publicSettings, Settings } from '../src/settings.js'
 import { Producer } from '../src/produce.js'
 import { Store } from '../src/store.js'
-import plugin from '../src/host.js'
+import { hostRuntime } from './fixtures/host-runtime.js'
 
 const PNG = Buffer.from('89504e470d0a1a0a000000000000', 'hex')
 const DEFINITION = { parameters: { properties: { prompt: { type: 'string' } } }, output: { schema: { properties: { paths: { type: 'array' } } } } }
@@ -231,38 +231,38 @@ test('Producer readiness uses injected capability and tool failures are not retr
 }))
 
 test('authenticated settings/test and readiness use the same tool backend; HTTP source never calls tools', async () => fixture(async ({ path }) => {
-  let handler, generated = 0
-  const ctx = context(async batch => { generated++; return success(batch, path) })
-  const baseGet = ctx.get
-  ctx.get = name => name === 'connection' ? { requestRejection: () => undefined } : baseGet(name)
-  ctx.effect = fn => fn()
-  ctx.webServer = { register: options => { handler = options.handler } }
-  plugin.apply(ctx)
-  const request = (method, route, body = {}) => new Promise(resolve => {
-    const res = { headersSent: false, setHeader() {}, end(raw) { resolve({ status: this.statusCode, body: JSON.parse(raw) }) } }
-    handler({ method, url: `/media-desk/${route}`, headers: { 'sec-fetch-site': 'same-origin' }, async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)) } }, res)
-  })
-  let response = await request('GET', 'settings')
-  assert.equal(response.body.image.source, 'http')
-  assert.equal(response.body.imageToolAvailable, true)
-  assert.equal(response.body.imageReady, false)
-  response = await request('POST', 'settings/test')
-  assert.equal(response.status, 400)
-  assert.match(response.body.error, /接口地址、模型和密钥/)
-  assert.equal(generated, 0)
-  await request('GET', 'state')
-  response = await request('POST', 'settings', { image: { source: 'tool' } })
-  assert.equal(response.status, 200, JSON.stringify(response.body))
-  assert.equal(response.body.imageReady, true)
-  response = await request('POST', 'settings/test')
-  assert.equal(response.status, 200)
-  assert.match(response.body.src, /^media-desk\/files\//)
-  assert.equal(generated, 1)
-  ctx.get = name => name === 'tools' ? undefined : name === 'connection' ? { requestRejection: () => undefined } : undefined
-  response = await request('GET', 'settings')
-  assert.equal(response.body.imageReady, false)
-  response = await request('POST', 'settings/test')
-  assert.equal(response.status, 400)
-  assert.match(response.body.error, /未找到订阅生图工具/)
-  assert.equal(generated, 1)
+  let generated = 0
+  const tools = context(async batch => { generated++; return success(batch, path) }).get('tools')
+  const host = await hostRuntime({ tools })
+  try {
+    const request = (method, route, body = {}) => new Promise(resolve => {
+      const res = { headersSent: false, setHeader() {}, end(raw) { resolve({ status: this.statusCode, body: JSON.parse(raw) }) } }
+      host.handler({ method, url: `/media-desk/${route}`, headers: { 'sec-fetch-site': 'same-origin' }, async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)) } }, res)
+    })
+    let response = await request('GET', 'settings')
+    assert.equal(response.body.image.source, 'http')
+    assert.equal(response.body.imageToolAvailable, true)
+    assert.equal(response.body.imageReady, false)
+    response = await request('POST', 'settings/test')
+    assert.equal(response.status, 400)
+    assert.match(response.body.error, /接口地址、模型和密钥/)
+    assert.equal(generated, 0)
+    await request('GET', 'state')
+    response = await request('POST', 'settings', { image: { source: 'tool' } })
+    assert.equal(response.status, 200, JSON.stringify(response.body))
+    assert.equal(response.body.imageReady, true)
+    response = await request('POST', 'settings/test')
+    assert.equal(response.status, 200)
+    assert.match(response.body.src, /^media-desk\/files\//)
+    assert.equal(generated, 1)
+    host.ctx.set('tools', undefined)
+    response = await request('GET', 'settings')
+    assert.equal(response.body.imageReady, false)
+    response = await request('POST', 'settings/test')
+    assert.equal(response.status, 400)
+    assert.match(response.body.error, /未找到订阅生图工具/)
+    assert.equal(generated, 1)
+  } finally {
+    await host.close()
+  }
 }))

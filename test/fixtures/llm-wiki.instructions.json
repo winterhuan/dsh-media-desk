@@ -1,0 +1,13 @@
+{
+  "source": "~/.agents/skills/llm-wiki",
+  "capturedAt": "2026-11-12",
+  "files": {
+    "SKILL.md": "f96245d9a5f22f9a29f1f730be0c33e4e6802b357061a7678f192e391b53bf75",
+    "references/factual-verification.md": "c8789d0612ec767d3c1758f2c22b3c59b30ce9bf127858d1e6da45d8c7051ff2",
+    "references/github-repositories.md": "f5d6fecc9a7fe778233aec87aae236583de5a02ea066cfe39dc8cf1e2bc0093b",
+    "references/maintenance.md": "19ca624df1a665e3029654959d09491f6781f4fd50491dd66768da0fa399981a",
+    "references/query.md": "653f41ec532a8745210e699fd89714218edbe11ca6ed235e1727fde082226f4c",
+    "references/synthesis-quality.md": "31a158e37520c75242c5ea7d3a7e90ef4561d1110210a38aed6d1926f91135dc",
+    "references/templates.md": "aaa83b0a7d1087f7e07c1ded24049ce030b37eabb9b2a856d3bf6d7071813e4e"
+  }
+}

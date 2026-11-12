@@ -8,6 +8,7 @@ import { InsightsView } from './insights.jsx'
 import { StyleView } from './style.jsx'
 import { ScheduleView } from './schedule.jsx'
 import { ModelButton, ModelPicker } from './modelpick.jsx'
+import { NativeSessionButton } from './native-session.jsx'
 import { SettingsDialog } from './settings.jsx'
 import { Studio } from './studio.jsx'
 import css from './styles.css'
@@ -110,7 +111,7 @@ function SampleBadge() {
   )
 }
 
-function Desk() {
+function Desk({ openSession }) {
   // 切换语言时整棵树重新渲染
   useLang()
   const ready = useDesk(s => Boolean(s.state))
@@ -164,6 +165,7 @@ function Desk() {
           <span style={{ flex: 1 }} />
           {ready ? <SampleBadge /> : null}
           {canUndo ? <IconButton icon="undo" label={t('撤销上一步')} onClick={undo} /> : null}
+          {ready ? <NativeSessionButton openSession={openSession} /> : null}
           {ready ? <ModelButton /> : null}
           <IconButton icon="gear" label={t('设置')} onClick={() => setDesk({ settingsOpen: true })} />
           {showDock ? null : <button type="button" className="md-open-dock" onClick={() => setDesk({ dockOpen: true })}><Icon name="chat" size={15} />{t('助手')}</button>}
@@ -173,7 +175,7 @@ function Desk() {
             <div className="md-page"><p className="md-muted">{t('工作台加载失败：{error}', { error })}</p><button type="button" className="md-btn" onClick={loadDesk}>{t('重试')}</button></div>
           ) : ready ? <Active /> : <div className="md-loading"><span className="md-shimmer">{t('正在铺开灵感…')}</span></div>}
         </main>
-        {ready ? <Studio /> : null}
+        {ready ? <Studio openSession={openSession} /> : null}
       </div>
       {ready && showDock ? <ChatDock /> : null}
       {ready ? <CaptureDialog /> : null}
@@ -189,10 +191,19 @@ function PanelIcon({ size }) {
   return <Icon name="scatter" size={size} />
 }
 
-export const inject = ['slots']
+/** Native navigation is supplied by the mounted workspace UI service. */
+export const inject = ['slots', 'uiWorkspace']
 
+/**
+ * Register Media Desk and inject a plain callback to open controller-owned Sessions.
+ * @param {import('@deepseek-ai/cordis').Context & { uiWorkspace: import('@deepseek-ai/dsh-client-ui-workspace/client').UiWorkspace }} ctx - Client root services.
+ * @returns {void}
+ */
 export function apply(ctx) {
-  ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL_ID }, Desk))
+  ctx.slots.inject('main', () => ctx.slots.register({
+    name: 'main', key: PANEL_ID,
+    inject: () => ({ openSession: sessionId => ctx.uiWorkspace.openSession(sessionId) }),
+  }, Desk))
   // 侧栏的名字只在注册时读一次，换语言时重新注册
   ctx.effect(() => {
     let release = null

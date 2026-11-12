@@ -4,6 +4,7 @@ import { ChatPanel } from './chat.jsx'
 import { downloadCover } from './cover.js'
 import { cancelProduce, closeItem, dispatchOps, regenAsset, revealSaved, runProduce, saveProduced, setDesk, toast, useDesk, watchProduction } from './desk.js'
 import { plural, t } from './i18n.js'
+import { NativeSessionButton } from './native-session.jsx'
 import { Icon, IconButton } from './ui.jsx'
 import { SPRING_SNAP, SPRING_SOFT, STYLE_CATEGORIES, fmtDate, fmtWhen, reducedMotion, renderMarkdown, styleIcon, textLength, toLocalInput } from './util.js'
 
@@ -480,7 +481,13 @@ function Sheet({ item, live }) {
 
 const DONE_SUGGESTIONS = ['标题再短一点', '语气轻松一点', '开场再抓人一点', '封面大字更有冲击力']
 
-export function Studio() {
+/**
+ * Show the selected work and its persistent native Session entry.
+ * @param {object} props - Native navigation supplied by the Desk's Slot injection.
+ * @param {(sessionId: string) => void} props.openSession - Open the bound ordinary Session page.
+ * @returns {React.ReactElement|null} Selected work, or null while none is open.
+ */
+export function Studio({ openSession }) {
   const id = useDesk(s => s.focusId)
   const item = useDesk(s => s.state?.items.find(i => i.id === s.focusId))
   const origin = useDesk(s => s.sheetOrigin)
@@ -534,6 +541,8 @@ export function Studio() {
             <>
               <IconButton icon="chevL" label={t('返回灵感')} onClick={closeItem} />
               <h2>{t('成稿')}</h2>
+              <span style={{ flex: 1 }} />
+              <NativeSessionButton workId={item.id} openSession={openSession} />
             </>
           )}
           top={<IdeaCard item={item} live={live} settings={settings} />}

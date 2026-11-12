@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process'
 import { stat, writeFile } from 'node:fs/promises'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { Service } from '@deepseek-ai/cordis'
 import { assistantModelOverride, callModel, chatPrompts, defaultSelection, extractJson, modelInfo, modelStatus, setAssistantModel } from './ai.js'
 import { defaultExportDir, resolveExportDir, saveProduction } from './export.js'
 import { harvest, harvestText } from './harvest.js'
@@ -19,6 +20,7 @@ import { normalizeStyle, stylePrompts } from './style.js'
 import { dshHome, Store } from './store.js'
 import { currentLang, platformName, tr, withLang } from './i18n.js'
 import { localizeSamples, samplesNeedLocale } from './seed.js'
+import { NativeSessions } from './native-sessions.js'
 
 const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets')
 const MAX_JSON = 4_000_000
@@ -296,6 +298,7 @@ async function route(ctx, store, desk, req, res) {
     return sendFile(req, res, join(store.filesDir, name))
   }
   if (method === 'GET') {
+    if (path === 'sessions') return json(res, 200, { associations: await desk.nativeSessions.list() })
     if (path === 'state') {
       if (!desk.settled) { desk.settled = true; await desk.producer.settleAll().catch(() => {}) }
       let state = await store.read()
@@ -338,6 +341,8 @@ async function route(ctx, store, desk, req, res) {
   if (path === 'upload') return handleUpload(req, store, res)
   const body = await readJson(req)
   switch (path) {
+    case 'sessions/open':
+      return json(res, 200, { association: await desk.nativeSessions.open(body.workId ?? null) })
     case 'ops': {
       const label = typeof body.label === 'string' ? body.label : tr('操作')
       const result = await store.mutate(label, (draft) => {
@@ -457,9 +462,16 @@ export function requestRejection(ctx, req) {
 
 export const name = 'dsh-media-desk'
 
-export default {
-  inject: ['webServer', 'connection'],
-  apply(ctx) {
+/** One Host Store and association service, available before native preset recovery. */
+export default class MediaDeskHost extends Service {
+  static inject = ['webServer', 'connection']
+
+  /**
+   * @param {object} ctx - DSH Host context with authenticated Web routes.
+   * @param {object} [config] - Optional Wiki path; otherwise WIKI_PATH or ~/wiki.
+   */
+  constructor(ctx, config = {}) {
+    super(ctx, 'mediaDesk')
     const store = new Store()
     const settings = new Settings(store.root)
     const producer = new Producer({
@@ -468,9 +480,25 @@ export default {
       generate: (image, prompt, options) => image.source === 'tool' ? generateToolImage(ctx, image, prompt, options) : generateImage(image, prompt, options),
     })
     const monid = createMonidRunner()
-    const desk = { settings, producer, monid }
+    const nativeSessions = new NativeSessions(ctx, store, settings, config)
+    Object.assign(this, { store, settings, producer, monid, nativeSessions })
+  }
+
+  async [Service.init]() {
+    const ctx = this.ctx
+    const { store, settings, nativeSessions } = this
+    const desk = this
+    await nativeSessions.init()
+    await store.read()
     // 启动时恢复用户在工作台里选过的助手模型
-    settings.read().then(saved => setAssistantModel(saved.assistant)).catch(() => {})
+    setAssistantModel((await settings.read()).assistant)
+    ctx.inject(['shellEnv'], shellCtx => shellCtx.shellEnv.register({
+      name: 'media-desk.wiki',
+      variables: { DSH_MEDIA_DESK_WIKI_PATH: { description: 'Wiki root bound to this Media Desk Session; set WIKI_PATH to this value for llm-wiki commands.' } },
+      resolve: execution => {
+        try { return { DSH_MEDIA_DESK_WIKI_PATH: nativeSessions.requireAssociation(execution.agent).wikiRoot } } catch { return {} }
+      },
+    }))
     ctx.effect(() => ctx.webServer.register({
       kind: 'prefix',
       path: '/media-desk',
@@ -487,9 +515,9 @@ export default {
             res.end()
             return
           }
-          json(res, err.status || 500, { error: err.message })
+          json(res, err.status || 500, { error: err.message, ...(err.code ? { code: err.code } : {}) })
         }
       },
     }), 'dsh-media-desk: /media-desk routes')
-  },
+  }
 }

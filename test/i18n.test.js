@@ -10,7 +10,7 @@ import { applyOps } from '../src/ops.js'
 import { applyRevision, normalizePlan } from '../src/produce.js'
 import { buildSeed, localizeSamples, migrateState, samplesNeedLocale } from '../src/seed.js'
 import { Store } from '../src/store.js'
-import plugin from '../src/host.js'
+import { hostRuntime } from './fixtures/host-runtime.js'
 
 const NOW = new Date('2026-10-31T15:00:00+08:00')
 const CJK = /[一-鿿]/
@@ -214,17 +214,12 @@ test('GET state 按请求头的语言换示例文字', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'media-desk-'))
   const previous = process.env.DSH_HOME
   process.env.DSH_HOME = dir
+  let host
   try {
-    let handler = null
-    const ctx = {
-      get: name => (name === 'connection' ? { requestRejection: () => undefined } : undefined),
-      effect: fn => fn(),
-      webServer: { register: (options) => { handler = options.handler } },
-    }
-    plugin.apply(ctx)
+    host = await hostRuntime()
     const get = lang => new Promise((resolve) => {
       const res = { statusCode: 0, headersSent: false, setHeader() {}, end: body => resolve({ status: res.statusCode, body: JSON.parse(body) }) }
-      handler({ url: '/media-desk/state', method: 'GET', headers: { 'x-media-desk-lang': lang } }, res)
+      host.handler({ url: '/media-desk/state', method: 'GET', headers: { 'x-media-desk-lang': lang } }, res)
     })
     const zh = await get('zh')
     assert.equal(zh.status, 200)
@@ -236,6 +231,11 @@ test('GET state 按请求头的语言换示例文字', async () => {
     const back = await get('zh')
     assert.equal(back.body.state.items[0].title, zh.body.state.items[0].title)
   } finally {
+    await host?.close()
+    if (host) {
+      assert.equal(host.handler, null)
+      assert.equal(host.ctx.get('mediaDesk'), undefined)
+    }
     if (previous === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previous
     await rm(dir, { recursive: true, force: true })

@@ -13,6 +13,8 @@ export const CORE = {
   '撤销上一步': 'Undo',
   '设置': 'Settings',
   '助手': 'Assistant',
+  '原生会话': 'Native session',
+  '全局原生会话': 'Global native session',
   '工作台加载失败：{error}': 'Couldn’t load Media Desk: {error}',
   '重试': 'Retry',
   '正在铺开灵感…': 'Loading your ideas…',

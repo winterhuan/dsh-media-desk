@@ -62,6 +62,16 @@ export async function loadDesk() {
   }
 }
 
+/**
+ * Open or restore the durable native Session for a work or the global assistant.
+ * @param {string|null} workId - Work identity, or null for the global assistant.
+ * @returns {Promise<object>} Bound association with the actual native Session identity.
+ */
+export async function openNativeSession(workId) {
+  const { association } = await request('sessions/open', { workId })
+  return association
+}
+
 export async function dispatchOps(ops, { label = t('操作'), undoable = true, silent = false } = {}) {
   try {
     const data = await request('ops', { ops, label, undoable })

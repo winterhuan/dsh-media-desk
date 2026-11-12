@@ -1,5 +1,19 @@
 // Host 英文词典：key 是中文原文，{name} 是占位符。
 export const EN = {
+  'Media Desk · 全局助手': 'Media Desk · Global assistant',
+  'Wiki 目录不可用：{path}。请检查 WIKI_PATH': 'The Wiki directory is unavailable: {path}. Check WIKI_PATH.',
+  '会话关联文件无法读取：{path}': 'The Session association file cannot be read: {path}',
+  '会话关联文件格式无效：{path}': 'The Session association file is invalid: {path}',
+  '原生创作会话缺少服务：{name}。请使用完整的 DSH Web 组合': 'The native creative Session requires {name}. Use the complete DSH Web profile.',
+  '原生创作组合无法使用：{error}': 'The native creative preset is unavailable: {error}',
+  '作品标识无效': 'The work ID is invalid.',
+  '作品不存在：{id}': 'The work does not exist: {id}',
+  '原生会话尚未持久保存，请检查 Session 存储服务': 'The native Session is not durably saved. Check the Session storage service.',
+  '此会话属于另一个 DSH home，请恢复原来的运行环境': 'This Session belongs to another DSH home. Restore its original environment.',
+  '会话创建尚未完成，请检查保留的会话关联': 'Session creation is incomplete. Inspect the retained association.',
+  '此原生会话尚未绑定 Media Desk 对象，请从工作台打开会话': 'This native Session has no Media Desk association. Open it from the workbench.',
+  '会话工作区与作品关联不一致，请恢复原工作区后重试': 'The Session workspace differs from its work association. Restore the original workspace and retry.',
+  '会话组合与作品关联不一致，请恢复原创作组合后重试': 'The Session preset differs from its work association. Restore the original creative preset and retry.',
   // 请求与文件
   未授权: 'Not authorized',
   内容太大: 'The content is too large',
