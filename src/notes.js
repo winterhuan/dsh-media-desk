@@ -9,7 +9,7 @@ import { tr } from './i18n.js'
 
 const METADATA = ['title', 'tags', 'source', 'url', 'language', 'noteMetadata']
 /** Fields retained with a work's language when selection or undo targets another language. */
-export const LANGUAGE_FIELDS = [...METADATA, 'body', 'content', 'media', 'drafts', 'production', 'sourceContent', 'textHistory', 'languageProvenance']
+export const LANGUAGE_FIELDS = [...METADATA, 'body', 'content', 'media', 'drafts', 'production', 'sourceContent', 'textHistory', 'languageBasis']
 const fingerprint = bytes => createHash('sha256').update(bytes).digest('hex')
 const failure = (code, message, status = 409) => Object.assign(new Error(message), { code, status })
 
@@ -435,7 +435,7 @@ export class Notes {
       if (typeof item.production.aiArticle === 'string') item.production.aiVersion = await this.writeFixed(item, 'ai-original', item.production.aiArticle)
     }
     this.project(item, metadata, body)
-    item.languageProvenance = { kind: 'explicit', language }
+    item.languageBasis = { kind: 'explicit', language }
     await this.projectHistory(item)
   }
 
@@ -457,7 +457,7 @@ export class Notes {
         const reference = variant.content ?? { wikiRoot: root.wikiRoot, notesRoot: root.notesRoot, relativePath: `works/${encodeURIComponent(item.id)}-${language}.md`, language }
         if (!this.roots.has(reference.notesRoot) || typeof reference.wikiRoot !== 'string') throw failure('notes/unowned-root', tr('作品所在的 Notes 目录尚未取得写入所有权'))
         plan.push({ workId: item.id, language, current: variant === variants[0][1], source: { createdAt: legacy.createdAt, ...structuredClone(variant), id: item.id, language },
-          reference, registered: Boolean(variant.content), provenance: variant.content || variant.language === language ? { kind: 'explicit', language }
+          reference, registered: Boolean(variant.content), languageBasis: variant.content || variant.language === language ? { kind: 'explicit', language }
             : legacy.sample && original.sampleLang === language ? { kind: 'legacy-sample', language, source: 'sampleLang' }
               : language === 'und' ? { kind: 'unknown', language } : { kind: 'explicit', language, source: 'otherLang' } })
       }
@@ -486,7 +486,7 @@ export class Notes {
     const variants = new Map()
     for (const entry of plan) {
       const source = entry.source
-      source.languageProvenance ??= entry.provenance
+      source.languageBasis ??= entry.languageBasis
       if (entry.registered) {
         const { metadata, body } = await this.readWork(source.content, source.id)
         this.project(source, metadata, body)

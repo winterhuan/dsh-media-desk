@@ -52,8 +52,8 @@ wiki/
 
 The layers have distinct ownership:
 
-1. `raw/`: source bodies are immutable; provenance and integrity frontmatter is
-   repairable without changing the body.
+1. `raw/`: source bodies are immutable; source-record and integrity fields in
+   frontmatter are repairable without changing the body.
 2. `entities/`, `concepts/`, `comparisons/`, `queries/`: agent-maintained Global
    Wiki synthesis and the only canonical knowledge layer.
 3. `notes/`: topic-organized learning and research materials, indexed by `notes/index.md`.
@@ -148,7 +148,7 @@ defined by the local schema.
 
 The body begins after the first closing `---` and is immutable. During ingest
 and re-ingest, validate the involved raw files; during lint, validate all raw
-files. Automatically repair unambiguous provenance, capture, importer-equivalent
+files. Automatically repair unambiguous source metadata, capture, importer-equivalent
 (for example `source` → `source_url`), and `sha256` fields without asking.
 
 Repairs must stay in frontmatter. Verify before and after that the body is
@@ -280,7 +280,7 @@ already explain them clearly. Give it a reader-facing title such as `关键实�
 Do not duplicate diagram nodes, later sections, ordinary feature lists, or every
 source file.
 
-Do not add a fixed evidence note beneath a diagram. Preserve provenance through
+Do not add a fixed evidence note beneath a diagram. Preserve source attribution through
 the page `sources` frontmatter, the normalized raw packet, and the reviewed
 commit in the page's source section. Do not repeat the packet's selected path
 list in the reading flow. After each diagram or coherent diagram group, add
@@ -477,7 +477,7 @@ Check:
 8. **Quality signals:** surface `confidence: low` and single-source pages without
    a confidence field.
 9. **Raw integrity and metadata:** apply the automatic repair rules above;
-   report ambiguous provenance and unexplained hash mismatches.
+   report ambiguous source metadata and unexplained hash mismatches.
 10. **Page size:** flag synthesized pages longer than about 200 lines.
 11. **Log size:** rotate after 500 entries.
 12. **Citation registration and contamination:** inline Raw citations exist and

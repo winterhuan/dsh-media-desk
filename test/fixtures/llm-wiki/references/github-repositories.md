@@ -191,7 +191,7 @@ hide the project name: the remaining structure should still explain what makes
 the system distinctive.
 
 Do not place a fixed evidence note beneath a diagram or repeat the raw packet's
-selected path list in the reading flow. Keep provenance in page frontmatter, the
+selected path list in the reading flow. Keep source records in page frontmatter, the
 normalized raw packet, and the reviewed commit in the source section. After a
 diagram or coherent diagram group, explain the flow and key boundaries in three
 to five steps. Retain an adjacent uncertainty, maturity limit, or implementation

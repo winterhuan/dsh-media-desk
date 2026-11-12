@@ -7,7 +7,7 @@ import { tr } from './i18n.js'
 const COLLECTIONS = new Set(['items', 'people', 'angles', 'styles', 'activeStyleId', 'skills', 'metrics', 'accounts', 'sampleCleared'])
 const ITEM_FIELDS = new Set(['kind', 'title', 'body', 'noteMetadata', 'language', 'url', 'source', 'tags', 'status', 'publishedAt', 'angleId', 'personaIds', 'parentId', 'rel', 'scheduledAt', 'platform', 'pinned', 'media', 'pos', 'score', 'drafts'])
 const PRODUCTION_FIELDS = new Set(['title', 'article', 'coverText', 'current', 'textVersion', 'aiVersion'])
-const WORK_FIELDS = new Set(['id', 'kind', 'createdAt', 'sample', 'localeLinked', 'imported', 'externalId', 'language', 'languageProvenance', 'content', 'sourceContent', 'textHistory', 'languageHistory', 'otherLang',
+const WORK_FIELDS = new Set(['id', 'kind', 'createdAt', 'sample', 'localeLinked', 'imported', 'externalId', 'language', 'languageBasis', 'content', 'sourceContent', 'textHistory', 'languageHistory', 'otherLang',
   'title', 'body', 'noteMetadata', 'customMetadata', 'legacyMetadata', ...ITEM_FIELDS, 'production'])
 const ACCEPTED_PRODUCTION = new Set([...PRODUCTION_FIELDS, 'article', 'aiArticle', 'facts', 'outline', 'characters', 'cover', 'images', 'shots', 'engine', 'notice'])
 const RUNTIME_FIELDS = new Set(['revision', 'status', 'stage', 'error', 'code', 'pendingId', 'conflicts', 'taskId', 'attemptId', 'sessionId', 'turnId', 'stepId', 'generationId', 'startedAt', 'finishedAt', 'savedPath', 'savedAt'])

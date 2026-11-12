@@ -91,7 +91,7 @@ test('填充迁移先验证备份并保留未知语言、所有语言稿与 AI �
   assert.equal(migration.status, 200, JSON.stringify(migration.value))
   const work = migration.value.state.items.find(row => row.id === 'populated_work')
   assert.equal(work.content.language, 'und', 'UI language and CJK text do not establish original language')
-  assert.equal(work.languageProvenance.kind, 'unknown')
+  assert.equal(work.languageBasis.kind, 'unknown')
   assert.equal(work.body, 'The accepted current production.\n')
   assert.equal(work.drafts.article.text, 'The separate article draft.\n')
   assert.equal(work.drafts.article.aiText, 'The fixed article AI original.\n')

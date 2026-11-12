@@ -401,7 +401,7 @@ export class Store {
           const current = plan.find(entry => entry.workId === item.id && entry.current)
           plan.push({ ...current, language, current: false, registered: false,
             reference: { ...current.reference, relativePath: `works/${encodeURIComponent(item.id)}-${language}.md`, language },
-            source: { id: item.id, createdAt: item.createdAt, ...sampleText(item.id, language) }, provenance: { kind: 'sample', language, source: 'packaged' } })
+            source: { id: item.id, createdAt: item.createdAt, ...sampleText(item.id, language) }, languageBasis: { kind: 'sample', language, source: 'packaged' } })
         }
         for (const entry of plan.filter(entry => entry.workId === item.id)) entry.current = entry.language === language
       }
