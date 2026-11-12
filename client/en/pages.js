@@ -55,6 +55,8 @@ export const PAGES = {
   '，': ',',
   '。': '.',
 
+  '公开页面无法读取时，请粘贴你选定的样文': 'If the public page cannot be read, paste the author sample you selected',
+  '或者选定自己的样文，提炼你的风格。': 'Or select your own writing sample to analyze your style.',
   // 请求和提示（desk.js）
   '请求失败（{status}）': 'Request failed ({status})',
   操作: 'Action',
@@ -196,35 +198,7 @@ export const PAGES = {
   '导出为 Skill': 'Export as skill',
   '在对话里说「以后标题都不要超过 20 个字」，这里就会多一条。': 'Tell the assistant “From now on, keep titles under 10 words” and a rule shows up here.',
 
-  // 导入账号（connect.jsx）
-  'monid keys add -k 你的密钥 -l main': 'monid keys add -k YOUR_KEY -l main',
-  已复制: 'Copied',
-  '复制失败：{error}': 'Couldn’t copy: {error}',
-  复制: 'Copy',
-  '小红书、抖音、B 站、TikTok、Instagram 和 X 的数据要通过 Monid 读取。它是第三方数据服务，按次收费，一个账号大约几分钱。': 'TikTok, Instagram, X, RedNote, Douyin and Bilibili data comes through Monid, a third-party data service that charges per request. Importing an account usually costs a few cents.',
-  '把这句话发给 DeepSeek Harness 的新会话': 'Send this to a new DeepSeek Harness session',
-  '它会帮你装好 Monid。': 'It will install Monid for you.',
-  复制安装指令: 'Copy install command',
-  '注册 Monid，创建一个密钥': 'Sign up for Monid and create an API key',
-  '余额不够的话要先充值。': 'Add credit first if your balance is low.',
-  在终端里保存密钥: 'Save the key in your terminal',
-  '密钥不要发在聊天里。': 'Don’t paste the key into chat.',
-  复制保存密钥的命令: 'Copy command',
-  'Monid 已经装好，还差第 3 步的密钥。': 'Monid is installed. Finish step 3 to add your key.',
-  '正在检查…': 'Checking…',
-  '我装好了，检查一下': 'Done, check again',
-  你的账号主页链接: 'Your profile link',
-  '小红书、抖音、B 站、TikTok、Instagram 或 X 的主页链接，App 分享出来的文字也可以': 'A TikTok, Instagram, X, RedNote, Douyin or Bilibili profile link. Text copied from the app’s Share button works too.',
-  '请只抓自己的账号。会读取最近 20 条公开内容和互动数据，放进内容和复盘，并提炼成你的风格。': 'Only import accounts you own. We’ll read your latest 20 public posts and their engagement, add them to Content and Insights, and learn your style from them.',
-  '链接会发给 Monid 和它的数据服务商。只能读到公开内容，后台才有的数据（如小红书和抖音的播放量）读不到。': 'Your link is sent to Monid and its data providers. Only public data is available, so dashboard-only stats like RedNote and Douyin views can’t be read.',
-  'Monid 余额 ${value}': 'Monid balance ${value}',
-  'Monid 已连接': 'Monid connected',
-  '正在导入和提炼…': 'Importing…',
-  '导入{platform}（约 {estimate}）': 'Import {platform} (~{estimate})',
-  '还没找到 Monid，先完成第 1 步': 'Monid isn’t installed yet. Start with step 1.',
-  导入我的账号: 'Import account',
-  '连接 Monid': 'Connect Monid',
-  '正在检查 Monid…': 'Checking Monid…',
+
 
   // 设置（settings.jsx）
   火山方舟: 'Volcengine Ark',

@@ -106,7 +106,7 @@ export class NotesMigration {
     await retain(this.store.file, 'state.json', state)
     for (const name of ['settings.json', 'sessions.json']) await retain(join(this.store.root, name), name, await optional(join(this.store.root, name)))
     const registered = references(original)
-    for (const directory of ['files', 'notes-writes']) for (const source of await files(join(this.store.root, directory))) {
+    for (const directory of ['files', 'notes-writes', 'media-writes', 'native-candidates', 'native-settings']) for (const source of await files(join(this.store.root, directory))) {
       const saved = source.slice(this.store.root.length + 1).split('\\').join('/')
       const bytes = await optional(source)
       await retain(source, saved, bytes)
@@ -118,7 +118,7 @@ export class NotesMigration {
       catch (error) { if (error.code !== 'notes/missing') throw error }
     }
     for (const [source, reference] of registered) {
-      try { await retain(source, `notes/${roots.indexOf(reference.notesRoot)}/${reference.relativePath}`, await this.store.notes.readBytes(reference), 'notes') }
+      try { await retain(source, `notes/${roots.indexOf(reference.notesRoot)}/${reference.relativePath}`, await this.store.notes.readBytes(reference, { binary: reference.relativePath.startsWith('assets/') }), reference.relativePath.startsWith('assets/') ? 'media' : 'notes') }
       catch (error) {
         if (!retainMissing || error.code !== 'notes/missing') throw error
         manifest.missingSources ??= []
@@ -197,13 +197,13 @@ export class NotesMigration {
     }
     const dataEntries = backup.entries.filter(entry => entry.kind === 'data')
     const names = new Set(dataEntries.map(entry => entry.saved))
-    for (const directory of ['files', 'notes-writes']) for (const source of await files(join(this.store.root, directory))) {
+    for (const directory of ['files', 'notes-writes', 'media-writes', 'native-candidates', 'native-settings']) for (const source of await files(join(this.store.root, directory))) {
       const saved = source.slice(this.store.root.length + 1).split('\\').join('/')
       if (!names.has(saved)) await capture(source, saved)
     }
     for (const name of ['settings.json', 'sessions.json']) if (!names.has(name)) await capture(join(this.store.root, name), name)
     for (const entry of dataEntries.filter(entry => entry.saved !== 'state.json')) await restore(entry, join(this.store.root, entry.saved), entry.saved)
-    for (const entry of backup.entries.filter(entry => entry.kind === 'notes')) {
+    for (const entry of backup.entries.filter(entry => ['notes', 'media'].includes(entry.kind))) {
       const reference = [...references(JSON.parse(await readFile(join(backup.path, 'state.json'), 'utf8'))).values()].find(reference => join(reference.notesRoot, reference.relativePath) === entry.source)
       if (!reference || !this.store.notes.roots.has(reference.notesRoot)) continue
       await this.store.notes.createDirectory(reference.notesRoot, reference.relativePath.split('/').slice(0, -1).join('/'))

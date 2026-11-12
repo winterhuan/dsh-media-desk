@@ -71,6 +71,7 @@ export class Notes {
         ...state.skills.filter(row => row.content?.notesRoot === root && !row.sample).map(row => ({ id: `rule:${row.id}`, title: row.name, path: row.content.relativePath })),
         ...(state.voice?.content?.notesRoot === root ? [{ id: 'voice', title: tr('个人语气'), path: state.voice.content.relativePath }] : []),
       ].sort((a, b) => a.id.localeCompare(b.id))
+      const media = Object.values(state.mediaReferences ?? {}).filter(row => row.notesRoot === root)
       let bytes = null
       try { bytes = await this.readBytes({ notesRoot: root, relativePath: 'index.md' }) } catch (error) { if (error.code !== 'notes/missing') throw error }
       const old = bytes?.toString('utf8') ?? '# Notes\n'
@@ -80,7 +81,8 @@ export class Notes {
       if (!works.length && !materials.length && !preferences.length && !opening) continue
       const section = [start, '## Works', '', ...works.map(item => link(item.title, item.content.relativePath)),
         ...(materials.length ? ['', '## Materials', '', ...materials.map(item => link(item.title, item.path))] : []),
-        ...(preferences.length ? ['', '## Preferences', '', ...preferences.map(item => link(item.title, item.path))] : []), end].join('\n')
+        ...(preferences.length ? ['', '## Preferences', '', ...preferences.map(item => link(item.title, item.path))] : []),
+        ...(media.length ? ['', '## Assets', '', ...media.map(item => link(item.workId + ' · ' + item.id, item.relativePath))] : []), end].join('\n')
       const next = opening ? old.slice(0, old.indexOf(start)) + section + old.slice(old.indexOf(end) + end.length)
         : old + (old.endsWith('\n') ? '\n' : '\n\n') + section + '\n'
       if (next === old) continue
@@ -132,7 +134,7 @@ export class Notes {
     return { metadata, body }
   }
 
-  async readBytes(reference) {
+  async readBytes(reference, { binary = false } = {}) {
     if (!this.roots.has(reference.notesRoot)) throw failure('notes/unowned-root', tr('作品所在的 Notes 目录尚未取得写入所有权'))
     if (typeof reference.relativePath !== 'string' || /[\u0000-\u001f\\]/.test(reference.relativePath)
       || reference.relativePath.split('/').some(part => !part || part === '.' || part === '..')) {
@@ -151,7 +153,7 @@ export class Notes {
       const info = await handle.stat()
       if (!info.isFile() || info.dev !== entry.dev || info.ino !== entry.ino) throw failure('notes/path-invalid', tr('作品文件必须是普通 Markdown 文件'))
       const bytes = await handle.readFile()
-      new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+      if (!binary) new TextDecoder('utf-8', { fatal: true }).decode(bytes)
       return bytes
     } catch (error) {
       if (error.code?.startsWith('notes/')) throw error
@@ -163,7 +165,7 @@ export class Notes {
   }
 
   /** Read and validate a regular owned file without yielding at receipt acceptance. */
-  readBytesSync(reference) {
+  readBytesSync(reference, { binary = false } = {}) {
     if (!this.roots.has(reference.notesRoot)) throw failure('notes/unowned-root', tr('作品所在的 Notes 目录尚未取得写入所有权'))
     if (typeof reference.relativePath !== 'string' || /[\u0000-\u001f\\]/.test(reference.relativePath)
       || reference.relativePath.split('/').some(part => !part || part === '.' || part === '..')) {
@@ -181,7 +183,7 @@ export class Notes {
       const info = fstatSync(descriptor)
       if (!info.isFile() || info.dev !== entry.dev || info.ino !== entry.ino) throw failure('notes/path-invalid', tr('作品文件必须是普通 Markdown 文件'))
       const bytes = readFileSync(descriptor)
-      new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+      if (!binary) new TextDecoder('utf-8', { fatal: true }).decode(bytes)
       return bytes
     } catch (error) {
       if (error.code?.startsWith('notes/')) throw error

@@ -334,6 +334,8 @@ test('迁移后删除与撤销保留已创作字段和主文件，不能恢复�
   state.items[0].production = { status: 'running', stage: 'drawing', attemptId: 'retired-runtime-attempt', startedAt: '2026-11-03T12:00:00Z',
     title: 'Retain the authored title', article: 'Retain the previous production text.\n', coverText: 'Retain cover words', cover: { src: 'media-desk/files/accepted-cover.png', status: 'done', prompt: 'Retain the accepted visual prompt' } }
   await writeFile(join(data, 'state.json'), JSON.stringify(state))
+  await mkdir(join(data, 'files'), { recursive: true })
+  await writeFile(join(data, 'files', 'accepted-cover.png'), Buffer.from('89504e470d0a1a0a', 'hex'))
   await runtime.start()
   const migration = await runtime.host('notes/migrate', {})
   assert.equal(migration.status, 200, JSON.stringify(migration.value))
@@ -348,7 +350,8 @@ test('迁移后删除与撤销保留已创作字段和主文件，不能恢复�
   const restored = undone.value.state.items.find(row => row.id === work.id)
   assert.equal(restored.production.title, 'Retain the authored title')
   assert.equal(restored.production.coverText, 'Retain cover words')
-  assert.equal(restored.production.cover.src, 'media-desk/files/accepted-cover.png')
+  assert.equal(restored.production.cover.src, work.production.cover.src)
+  assert.match(restored.production.cover.src, /^media-desk\/media\//)
   assert.equal(restored.production.status, undefined)
   assert.equal(restored.production.stage, undefined)
   assert.equal(restored.production.attemptId, undefined)

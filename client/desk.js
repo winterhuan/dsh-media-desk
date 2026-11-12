@@ -72,6 +72,11 @@ export async function openNativeSession(workId) {
   return association
 }
 
+/** Start a fresh conversation while retaining the old native Session and draft. */
+export async function newNativeConversation(workId) {
+  return (await request('chat/clear', { workId })).association
+}
+
 export async function dispatchOps(ops, { label = t('操作'), undoable = true, silent = false, expectedContent, throwOnError = false } = {}) {
   try {
     const versions = expectedContent ?? Object.fromEntries(ops.flatMap(op => {
@@ -118,6 +123,7 @@ export async function undo(id = snapshot.undoId) {
 
 /** @returns {Promise<object[]>} Retained saves, conflicts and accepted receipts. */
 export async function savedNotesWrites() { return (await request('notes/saves')).writes }
+export async function savedMediaWrites() { return (await request('media/saves')).saves }
 
 /** @returns {Promise<object[]>} Verified migration metadata without settings or file contents. */
 export async function notesMigrationBackups() { return (await request('notes/migrations')).migrations }
@@ -284,45 +290,13 @@ export async function testImage(payload) {
   }
 }
 
-function runActions(actions) {
-  for (const action of actions) {
-    if (action.type === 'produce' && action.id) {
-      openItem(action.id)
-      runProduce(action.id)
-    }
-    if (action.type === 'open' && action.id) openItem(action.id)
-    if (action.type === 'nav' && action.view) setDesk({ view: action.view })
-  }
-}
-
-export async function sendChat(text) {
-  const { chatQuote: quote, focusId } = snapshot
-  // 选中的段落或某一镜，随消息一起交给模型
-  const message = quote ? (quote.text ? t('关于{label}「{quote}」：{text}', { label: quote.label, quote: quote.text, text }) : t('关于{label}：{text}', { label: quote.label, text })) : text
-  setDesk(s => ({
-    thinking: true,
-    chatQuote: null,
-    state: { ...s.state, chat: [...s.state.chat, { id: `tmp_${Date.now()}`, role: 'user', text: message, itemId: focusId ?? undefined }] },
-  }))
-  try {
-    const data = await request('chat', { message, focusId: focusId ?? undefined })
-    installNotesState(data)
-    setDesk({ modelOk: data.modelOk, modelError: data.modelError })
-    runActions(data.actions || [])
-  } catch (err) {
-    report(err)
-    await loadDesk()
-  } finally {
-    setDesk({ thinking: false })
-  }
-}
-
 export async function saveProduced(id) {
   try {
     const production = snapshot.state.items.find(row => row.id === id)?.production
     // 视频封面在浏览器里合成，一起存进文件夹
     const videoCover = await coverDataUrl({ src: production.cover?.src, text: production.coverText || production.title }).catch(() => undefined)
-    const data = await request('produce/save', { id, videoCover })
+    const item = snapshot.state.items.find(row => row.id === id)
+    const data = await request('produce/save', { id, videoCover, expectedContent: item.content ? { [id]: item.content } : {}, coverSrc: production.cover?.src, coverText: production.coverText || production.title })
     setDesk({ state: data.state })
     toast(t('已保存到 {path}', { path: data.path }))
   } catch (err) {
@@ -379,47 +353,11 @@ export async function captureFiles(files) {
   }
 }
 
-export async function refreshAccount(payload) {
-  try {
-    const data = await request('account/refresh', payload)
-    installNotesState(data)
-    if (data.fetchError) toast(t('读取主页失败：{error}', { error: data.fetchError }), { error: true })
-    else toast(t('已更新账号档案'))
-    return data
-  } catch (err) {
-    report(err)
-    return null
-  }
-}
-
 export async function extractStyle(payload) {
   try {
     const data = await request('style/extract', payload)
     installNotesState(data)
-    const missed = data.failures?.length ?? 0
-    toast(missed ? t(plural(missed, '风格提炼好了，有 1 个链接没抓到', '风格提炼好了，有 {n} 个链接没抓到'), { n: missed }) : t('风格提炼好了，之后就按它写'), { undo: true })
-    return true
-  } catch (err) {
-    report(err)
-    return false
-  }
-}
-
-export async function monidStatus() {
-  try {
-    return await request('monid/status')
-  } catch (err) {
-    return { state: 'error', message: err.message }
-  }
-}
-
-export async function importAccount(payload) {
-  try {
-    const data = await request('monid/import', payload)
-    installNotesState(data)
-    const spent = data.cost ? t('，花费 ${cost}', { cost: data.cost.toFixed(3) }) : ''
-    const what = t(plural(data.count, '读到 {name} 的 1 条内容，新增 {added} 条', '读到 {name} 的 {count} 条内容，新增 {added} 条'), { name: data.nickname, count: data.count, added: data.added })
-    toast(data.styleError ? t('{what}{spent}。风格没提炼成：{error}', { what, spent, error: data.styleError }) : t('{what}，已提炼成风格{spent}', { what, spent }), { error: Boolean(data.styleError), undo: !data.styleError })
+    setDesk({ dockOpen: true })
     return true
   } catch (err) {
     report(err)
@@ -431,7 +369,7 @@ export async function learnSkills() {
   try {
     const data = await request('skills/learn', {})
     installNotesState(data)
-    toast(data.added ? t(plural(data.added, '从数据里提炼出 1 条新规则，等你确认', '从数据里提炼出 {n} 条新规则，等你确认'), { n: data.added }) : t('目前的数据还提炼不出新规则'))
+    setDesk({ dockOpen: true })
   } catch (err) {
     report(err)
   }
@@ -451,3 +389,25 @@ export function fetchInsights() {
   return request('insights')
 }
 
+
+
+/** Poll accepted Host data while the workbench is visible, including asynchronous global edits. */
+export function watchDesk() {
+  let stopped = false
+  const poll = async () => {
+    while (!stopped) {
+      try {
+        const data = await request('state')
+        if (!stopped) { installNotesState(data); setDesk({ error: null }) }
+      } catch (error) { if (!stopped) setDesk({ error: error.message }) }
+      await new Promise(resolve => setTimeout(resolve, 1500))
+    }
+  }
+  poll()
+  return () => { stopped = true }
+}
+
+/** @returns {Promise<void>} Retained native or image save accepted without another generation request. */
+export async function retryCreativeSave(kind, id) {
+  installNotesState(await request(kind === 'media' ? 'media/retry' : 'native/retry', { id }))
+}

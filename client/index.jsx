@@ -1,13 +1,12 @@
 // dsh-media-desk 浏览器半片：侧栏入口 + main 全局面板。
 import React from 'react'
 import { HomeView } from './canvas.jsx'
-import { ChatDock } from './chat.jsx'
+import { ChatDock, NativeConversation } from './chat.jsx'
 import { ContentView } from './content.jsx'
-import { captureFiles, captureUrl, dispatchOps, loadDesk, setDesk, undo, useDesk } from './desk.js'
+import { captureFiles, captureUrl, dispatchOps, loadDesk, watchDesk, setDesk, undo, useDesk } from './desk.js'
 import { InsightsView } from './insights.jsx'
 import { StyleView } from './style.jsx'
 import { ScheduleView } from './schedule.jsx'
-import { ModelButton, ModelPicker } from './modelpick.jsx'
 import { NativeSessionButton } from './native-session.jsx'
 import { NotesRecoveryDialog } from './notes.jsx'
 import { SettingsDialog } from './settings.jsx'
@@ -112,7 +111,7 @@ function SampleBadge() {
   )
 }
 
-function Desk({ openSession }) {
+function Desk({ openSession, retainSession, SessionProvider, renderSlot, initializeDraft }) {
   // 切换语言时整棵树重新渲染
   useLang()
   const ready = useDesk(s => Boolean(s.state))
@@ -124,7 +123,7 @@ function Desk({ openSession }) {
   const [width, setWidth] = React.useState(1600)
   const narrow = width < 1020
 
-  React.useEffect(() => { loadDesk() }, [])
+  React.useEffect(() => { loadDesk(); return watchDesk() }, [])
   // 窗口窄的时候对话栏会盖住内容，默认收起，需要时再打开
   React.useEffect(() => {
     if (narrow) setDesk({ dockOpen: false })
@@ -148,6 +147,7 @@ function Desk({ openSession }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [canUndo])
 
+  const renderConversation = reference => <SessionProvider session={reference}>{renderSlot('media-desk.conversation', {})}</SessionProvider>
   // 工作区有自己的对话栏
   const focused = useDesk(s => Boolean(s.focusId))
   const showDock = dockOpen && !focused
@@ -168,7 +168,6 @@ function Desk({ openSession }) {
           {canUndo ? <IconButton icon="undo" label={t('撤销上一步')} onClick={() => undo()} /> : null}
           {ready ? <IconButton icon="save" label={t('恢复保存与迁移')} onClick={() => setDesk({ notesRecovery: true })} /> : null}
           {ready ? <NativeSessionButton openSession={openSession} /> : null}
-          {ready ? <ModelButton /> : null}
           <IconButton icon="gear" label={t('设置')} onClick={() => setDesk({ settingsOpen: true })} />
           {showDock ? null : <button type="button" className="md-open-dock" onClick={() => setDesk({ dockOpen: true })}><Icon name="chat" size={15} />{t('助手')}</button>}
         </header>
@@ -177,14 +176,13 @@ function Desk({ openSession }) {
             <div className="md-page"><p className="md-muted">{t('工作台加载失败：{error}', { error })}</p><button type="button" className="md-btn" onClick={loadDesk}>{t('重试')}</button></div>
           ) : ready ? <Active /> : <div className="md-loading"><span className="md-shimmer">{t('正在铺开灵感…')}</span></div>}
         </main>
-        {ready ? <Studio openSession={openSession} /> : null}
+        {ready ? <Studio openSession={openSession} retainSession={retainSession} renderConversation={renderConversation} initializeDraft={initializeDraft} /> : null}
       </div>
-      {ready && showDock ? <ChatDock /> : null}
+      {ready && showDock ? <ChatDock retainSession={retainSession} renderConversation={renderConversation} initializeDraft={initializeDraft} /> : null}
       {ready ? <CaptureDialog /> : null}
       <FormDialog />
       {ready ? <NotesRecoveryDialog /> : null}
       {ready ? <SettingsDialog /> : null}
-      {ready ? <ModelPicker /> : null}
       <Toast />
     </div>
   )
@@ -195,7 +193,7 @@ function PanelIcon({ size }) {
 }
 
 /** Native navigation is supplied by the mounted workspace UI service. */
-export const inject = ['slots', 'uiWorkspace']
+export const inject = ['slots', 'uiWorkspace', 'sessions', 'conversation']
 
 /**
  * Register Media Desk and inject a plain callback to open controller-owned Sessions.
@@ -205,8 +203,10 @@ export const inject = ['slots', 'uiWorkspace']
 export function apply(ctx) {
   ctx.slots.inject('main', () => ctx.slots.register({
     name: 'main', key: PANEL_ID,
-    inject: () => ({ openSession: sessionId => ctx.uiWorkspace.openSession(sessionId) }),
+    children: { 'media-desk.conversation': { kind: 'single', scope: 'session' } },
+    inject: () => ({ openSession: sessionId => ctx.uiWorkspace.openSession(sessionId), retainSession: sessionId => ctx.sessions.retain(sessionId, { source: 'sidebarView' }), initializeDraft: (reference, prompt) => ctx.conversation.input.requestDraftInitialization(reference.binding, { prompt, whenDraftExists: 'append' }) }),
   }, Desk))
+  ctx.slots.inject('media-desk.conversation', () => ctx.slots.register({ name: 'media-desk.conversation' }, NativeConversation))
   // 侧栏的名字只在注册时读一次，换语言时重新注册
   ctx.effect(() => {
     let release = null

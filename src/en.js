@@ -1,5 +1,6 @@
 // Host 英文词典：key 是中文原文，{name} 是占位符。
 export const EN = {
+  "当前策划的脚本尚未接受，请等待完成后保存": "The current plan has no accepted script yet. Wait for it to finish before saving.",
   "已接受的数据在保存准备期间变化，请重新读取": "The accepted Store changed during save preparation",
   "保存身份无效，请重新提交编辑": "Invalid save identity",
   "保存失败，请检查保存位置和写入权限后重试": "Saving failed. Check the save location and write permissions, then retry.",
@@ -146,13 +147,6 @@ export const EN = {
   '这个链接打开后不是账号主页。请到账号主页再复制一次链接。': 'This link doesn\'t lead to an account profile. Open the profile page and copy its link again.',
   平台没有返回内容: 'The platform returned nothing',
   无标题: 'Untitled',
-  'Monid 命令运行失败': 'The Monid command failed',
-  'Monid 返回的内容看不懂，可以先升级一下命令行': 'Couldn\'t read what Monid returned. Try updating the Monid CLI.',
-  '还没装好 Monid': 'Monid isn\'t installed yet',
-  'Monid 还没配置密钥': 'Monid doesn\'t have an API key yet',
-  'Monid：{message}': 'Monid: {message}',
-  '这次导入被 Monid 后台的预算限制拦下了，可以到 app.monid.ai 调整后再试': 'Monid\'s budget limit blocked this import. Adjust it at app.monid.ai and try again.',
-  'Monid 这次没跑完（{status}）': 'Monid didn\'t finish this run ({status})',
   未知状态: 'unknown status',
   '没抓到内容，账号可能是私密的或者还没发过内容。': 'No posts found. The account may be private or hasn\'t posted yet.',
 

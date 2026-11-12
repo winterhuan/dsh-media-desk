@@ -18,7 +18,7 @@ async function finishedProduction(runtime, id) {
   const deadline = Date.now() + 15000
   while (Date.now() < deadline) {
     const result = await runtime.host('production?id=' + id)
-    if (!result.value.live.running) return result.value.production
+    if (result.value.production?.status !== 'running') return result.value.production
     await new Promise(resolve => setTimeout(resolve, 25))
   }
   throw new Error('Production did not settle: ' + id)
@@ -553,10 +553,8 @@ test('已登记作品的成稿与人工修改直接写回主文件，AI 原稿�
   const recipes = {}
   const runtime = await nativeRuntime(t, { recipes })
   const barrier = Object.fromEntries(['enteredPath', 'releasePath', 'abortedPath', 'settledPath'].map(name => [name, join(runtime.root, name)]))
-  recipes.MD_FIXTURE_REGISTERED_PRODUCTION = { calls: [], barrier, replies: [
-    '{"title":"Accepted plan","coverText":"One clear idea","facts":[],"outline":[],"cover":"A paper boat","characters":"","images":[],"shots":[]}',
-    '# Accepted model title\n\nThe accepted produced script.\n',
-  ] }
+  recipes.MD_STAGE_plan = { calls: [{ name: 'media_desk_read', arguments: { kind: 'work' } }, { name: 'media_desk_submit_result', arguments: { stageId: '$stageId', result: JSON.stringify({ title: 'Accepted plan', coverText: 'One clear idea', facts: [], outline: [], cover: 'A paper boat', characters: '', images: [], shots: [], sources: [] }) } }], barrier, reply: 'Plan submitted.' }
+  recipes.MD_STAGE_article = { calls: [{ name: 'media_desk_read', arguments: { kind: 'work' } }, { name: 'media_desk_submit_result', arguments: { stageId: '$stageId', result: JSON.stringify({ article: 'The accepted produced script.', sources: [] }) } }], reply: 'Article submitted.' }
   await runtime.start()
   await runtime.host('settings', { imageCount: 0, shotCount: 0 })
   const added = await runtime.host('ops', { ops: [{ op: 'add_item', title: 'Registered production', body: 'MD_FIXTURE_REGISTERED_PRODUCTION original source.\n', language: 'en' }] })
@@ -599,10 +597,7 @@ test('延迟模型结果提交前拒绝已改变的 Notes 版本，保留外部�
   const recipes = {}
   const runtime = await nativeRuntime(t, { recipes })
   const barrier = Object.fromEntries(['enteredPath', 'releasePath', 'abortedPath', 'settledPath'].map(name => [name, join(runtime.root, name)]))
-  recipes.MD_FIXTURE_PRODUCTION_STALE = { calls: [], barrier, replies: [
-    '{"title":"An old-input plan","coverText":"Old input","facts":[],"outline":[],"cover":"A paper boat","characters":"","images":[],"shots":[]}',
-    '# Old-input result\n\nA result based on the old source.\n',
-  ] }
+  recipes.MD_STAGE_plan = { calls: [{ name: 'media_desk_read', arguments: { kind: 'work' } }, { name: 'media_desk_submit_result', arguments: { stageId: '$stageId', result: JSON.stringify({ title: 'An old-input plan', coverText: 'Old input', facts: [], outline: [], cover: 'A paper boat', characters: '', images: [], shots: [], sources: [] }) } }], barrier, reply: 'Candidate submitted.' }
   await runtime.start()
   await runtime.host('settings', { imageCount: 0, shotCount: 0 })
   const added = await runtime.host('ops', { ops: [{ op: 'add_item', title: 'A delayed result', body: 'MD_FIXTURE_PRODUCTION_STALE source text.\n', language: 'en' }] })
@@ -630,7 +625,7 @@ test('公开停用 Host 取消模型调用，等待外部结算和所属写入�
   holder = await nativeRuntime(t, { recipes, stopTimeoutMs: 60000 })
   contender = await nativeRuntime(t)
   const barrier = Object.fromEntries(['enteredPath', 'releasePath', 'abortedPath', 'cleanupReleasePath', 'settledPath'].map(name => [name, join(holder.root, name)]))
-  recipes.MD_FIXTURE_PRODUCER_BARRIER = { calls: [], reply: 'A delayed model result.', barrier }
+  recipes.MD_STAGE_plan = { calls: [], reply: 'A delayed model result.', barrier }
   await holder.start()
   const added = await holder.host('ops', { ops: [{ op: 'add_item', title: 'A work with a held model', body: 'MD_FIXTURE_PRODUCER_BARRIER accepted source text.\n', language: 'en' }] })
   const id = added.value.receipts[0].target

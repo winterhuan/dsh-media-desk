@@ -1,341 +1,92 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-zh-dark.webp">
-    <img src="docs/assets/hero-zh-light.webp" alt="自媒体工作台：DSH 上最爽的创作工作台" width="100%">
-  </picture>
-</p>
-
-# 自媒体工作台
+# 自媒体工作台使用指南
 
 [English](GUIDE.md) | 中文
 
-<p align="center"><b>DeepSeek Harness 的一个插件。记一句灵感，一键做出脚本、封面、配图和分镜。</b></p>
+## 摘要
 
-<p align="center">由小红书科技博主 <a href="https://www.xiaohongshu.com/user/profile/5faedce8000000000101c8a3"><b>蜗牛的科技笔记</b></a> 开发，一个每天要发内容的人，给自己做的工作台。</p>
+记录灵感，通过原生 DSH 会话研究 Wiki，编辑当前 Notes Markdown，并生成脚本与图片素材。五个工作台视图保留作品、风格、人物、排期和手动数据复盘。发布与视频剪辑仍由你完成。
 
-<p align="center">
-  <a href="#三步上手">安装</a> ·
-  <a href="#要花钱吗">要花钱吗</a> ·
-  <a href="#问答">问答</a> ·
-  <a href="GUIDE.md">English</a>
-</p>
+## 目录
 
-<p align="center">
-  <img alt="DeepSeek Harness 0.2.x" src="https://img.shields.io/badge/DeepSeek%20Harness-0.2.x-111?style=flat-square">
-  <img alt="Mac 桌面版与网页版" src="https://img.shields.io/badge/Mac%20%E6%A1%8C%E9%9D%A2%E7%89%88-%E7%BD%91%E9%A1%B5%E7%89%88-111?style=flat-square">
-  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/MIT-%E5%BC%80%E6%BA%90-111?style=flat-square"></a>
-  <a href="https://github.com/woniuniuniu/dsh-media-desk/stargazers"><img alt="Star" src="https://img.shields.io/github/stars/woniuniuniu/dsh-media-desk?style=flat-square&color=111&label=Star"></a>
-</p>
+- [开始与迁移](#start-and-migrate)
+- [创作与继续对话](#create-and-continue)
+- [使用五个视图](#use-the-five-views)
+- [图片与导出](#images-and-export)
+- [Notes 恢复](#notes-recovery)
+- [费用与限制](#costs-and-limits)
+- [进一步阅读](#further-exploration)
 
-<br>
+<a id="start-and-migrate"></a>
+## 开始与迁移
 
-## 它是什么
+在完整 DSH `0.2.2-rc.1` Web profile 中，按[包说明](README.zh.md#use-this-package)安装本 fork，从侧栏打开自媒体工作台。将 `WIKI_PATH` 指向 Agent 机器上的现有 Wiki，或使用默认 `~/wiki`；Host 的 `wikiPath` 可覆盖它。Wiki 或原生组件缺失时会提示所需修复。
 
-装在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 侧栏里的一个页面。打开是一面灵感墙，一句话记一个灵感；点开任何一条，一键生成口播脚本、标题、视频封面、配图和黑白线稿分镜；左边聊一句，右边就改。做好的稿子拖到日历上排期，发布之后回来看数据。
+使用旧数据前先停止旧版 Media Desk 进程。打开**恢复保存与迁移**，选择**迁移旧作品到 Notes**；文件发布前会创建并验证私有备份。作品身份、原始选题、草稿、固定 AI 原稿、选定样文、来源、自定义偏好、语言、已接受图片、指标、排期和设置均保留。重复迁移复用回执；未知原始语言使用 `und`。
 
-五个页面：**灵感 · 内容 · 排期 · 复盘 · 风格**。界面有中文和英文，默认跟随 DeepSeek Harness 的语言，也可以在插件设置里固定；切到英文后，脚本、标题和分镜也用英文写。网页版在手机浏览器里也能打开。
+## 创作与继续对话
+<a id="create-and-continue"></a>
 
-除了小红书、抖音、B 站、公众号，也支持 TikTok、Instagram、YouTube 和 X，发海外也能用。
+在成稿页打开作品，通过内嵌原生会话发送请求。每篇作品保留一个普通 DSH Session，全局助手另用独立 Session。工作区入口与工作台打开同一历史，包括工具、批准、问答、附件和原生输入草稿。重新打开面板保留关联。
 
-<br>
+在原生会话中选择文字模型；变更作用于下一尚未准备请求的步骤。**成稿**在 Host 受理一次策划尝试；重复点击复用活跃尝试。Agent 使用 llm-wiki、选定材料、当前风格、启用规则和个人语气。成功接受策划后启动脚本与独立图片任务。提交或流式候选须在匹配的原生轮次成功且 Notes 保存后才成为正式文字。
 
-## 一键成稿
+原生 **Stop** 停止当前轮次并保留待发输入；已受理的图片可以结束。**取消成稿**停止整次制作及其图片。队列编辑、删除与引导使发生变化的阶段输入失效。Stop 后可继续发送。**开始新对话**先停止活跃的所属工作，再关联新 Session；旧历史、旧待发输入与已接受内容保留。
 
-<table>
-<tr>
-<td width="62%">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/f-studio-dark.webp">
-    <img src="docs/assets/f-studio-light.webp" width="100%" alt="成稿工作区：左边对话，右边是标题、封面、脚本和六格分镜">
-  </picture>
-</td>
-<td valign="top">
-<p><b>整页一起长出来。</b></p>
-<p>点开灵感，稿面的格子一开始就排好了。标题、脚本、视频封面、配图和六格分镜同时生成，一边生成一边填满。</p>
-<p><b>说一句，就改。</b></p>
-<p>「表达再直接一点」「第 3 镜换成俯拍」「封面字更有冲击力」，右边实时更新，每一步都能撤销。</p>
-<p><b>拿走就能用。</b></p>
-<p>脚本直接编辑、一键复制；或者连封面、配图和分镜图一起，保存成一个文件夹。</p>
-</td>
-</tr>
-</table>
+在正文中选择一段并点击**让助手改这段**，内容及选择时版本进入原生草稿。若编辑接受前 Notes 变化，请从最新正文重新选择。Notes 文件缺失、无效或冲突时会阻止写入，并保留编辑草稿与已接受内容。
 
-<br>
+<a id="use-the-five-views"></a>
+## 使用五个视图
+
+- **灵感墙：**记录笔记、普通公开链接和上传材料，筛选并打开作品。
+- **内容看板：**管理灵感、大纲、草稿、待发布和已发布状态。
+- **风格：**选择写作风格并保留自定义风格卡。
+- **排期：**将作品放到日历，手动发布后更新状态。
+- **复盘：**手动录入作品指标或粘贴平台汇总 CSV，查看观察并提出写作规则。
+
+选择内置风格，或通过明确粘贴／选定的网页作者样文提炼自定义风格。知识综合页提供证据，不作为作者文风。审查生成的规则提案，启用需要的规则。导出 `media-desk-voice` 使用当前启用的自定义风格与规则；旧导出技能不能静默重新启用停用规则。
+
+自动账号采集及其 Monid 配置入口已移除。历史账号、采集内容、普通链接与指标仍保留。手动指标可关联作品；CSV 表示平台汇总。导入采用追加记录，重复导入累计快照可能重复计数。这些汇总不提供逐帖实时更新，也不能证明写作规则导致某个结果。
+
+<a id="images-and-export"></a>
+## 图片与导出
+
+在设置中选择配图数、分镜数和生图来源。HTTP 来源使用配置的 OpenAI 兼容 Images API 与私有密钥。工具来源复用 `dsh-plugin-subscriptions` 注册的兼容 `image_generate`，包括冲突别名。工具尺寸与质量独立于保留的 HTTP 设置。**生成测试图**会发出实际付费或消耗额度的请求；仅检测注册不能验证登录或额度。
+
+后台图片受 Host 工具策略与当前订阅工具偏好约束。需要不受支持批准的调用会失败；后台调用不继承可见 Session 的限制或账号绑定。工具失败不自动回退 HTTP，也不额外重试工具。纯 Code Mode/PTC 执行器不能直接调用该根生图工具。HTTP 限流重试限制在同一次图片尝试内。
+
+未接入生图时，已接受脚本和分镜描述仍可使用。单图失败保留已接受脚本与其他素材，可独立重画该图。已接受字节只保存在 `notes/assets/<work-id>/`。修复存储后可重试保留的保存失败，无需重新生图。
+
+**保存**每次创建新导出目录，包含已接受脚本、分镜、可用图片、可选的合成视频封面、`sources.md` 和 `manifest.json`。来源与口播文字分开。清单记录正文快照、图片指纹与缺失素材。新策划的脚本接受前不能与旧脚本混合导出。同标题导出不复用旧目录或文件。
 
 <a id="notes-recovery"></a>
 ## Notes 恢复
 
-使用本 fork 的完整 DSH `0.2.2-rc.1` Web profile，安装步骤见[包说明](README.zh.md#use-this-package)。
+**正文**卡片直接编辑 `notes/works/<work-id>-<language>.md`。改标题不会重命名该文件。**作品语言**切换保留的语言版本。材料使用 `notes/materials/`，自定义语气、风格与规则使用 `notes/preferences/`，固定 AI 原稿与先前格式使用 `notes/history/<work-id>/`。`notes/index.md` 提供托管导航并保留无关文字。
 
-「正文」格子编辑 `notes/works/<work-id>-<language>.md` 中的当前 Markdown。修改标题后，文件名仍保留作品身份。「作品语言」选择器在已保存版本之间切换；固定 AI 原稿和此前的草稿格式保留在 `notes/history/<work-id>/`。
+读取及接受前都会检查外部字节变化。**重新关联作品文件**只接受所属目录中身份与语言相同的普通作品文件。保存失败时，修复提示的位置或权限，在恢复对话框重试保留的原生或媒体候选。接受已成功时，重试返回现有回执。停止或被替代的候选不能被接受。
 
-迁移已有作品时，打开工作台顶部的「恢复保存与迁移」，点击「迁移旧作品到 Notes」。迁移先创建并验证私有备份，再发布文件，保留作品身份、原始来源文字、草稿、AI 原稿和已保存语言。旧正文的语言不明时使用 `und`；界面语言不能代表作者语言。重复迁移返回同一份已完成回执。目标位置若已有无关文件，须先保留并改名，或明确登记该文件。
+发生版本冲突时，核对当前正文与保留的外部版本，再选择保留当前正文或采用修复后的外部版本。两个版本与候选仍可查看。文件再次变化时先刷新。撤销针对原接受编辑的语言，保留后续不重叠编辑；重叠时提示冲突，不降低版本。
 
-保存失败时，保留编辑框文字并打开恢复对话框。修复提示的目录或权限问题后，对保留的候选点击「重试保存」。这会复用已保存内容及其接受身份，不重复请求模型或生图服务。任务候选未通过所属任务校验时，不能使用通用重试入口，对话框会提示这一限制。
-
-出现「版本冲突」时，点击「核对版本」，比较当前正文与保留的外部文件，再选择「保留当前正文」或「采用保留的外部正文」并应用选择。双方版本和候选均保留。格式无效的外部 Markdown 可查看，但须修复后才能采用。文件再次变化时，先刷新并核对新版本。持有旧文件句柄的编辑器可在选择后产生另一条冲突。
-
-撤销只还原已接受的编辑，并保留后来不重叠的文字或元数据修改。它针对该编辑保存的语言，不改变当前语言选择。修改重叠时报告冲突，保留撤销记录供修复。撤销不会恢复旧成稿执行状态或降低内容版本。
-
-回滚前停止选定的 DSH 写入者，并使用已构建的检出。将 `DSH_HOME` 和 `WIKI_PATH` 设为已停止 profile 的 home 与 Wiki，将 `MEDIA_DESK_MIGRATION_ID` 设为恢复对话框备份路径中的已验证备份身份，然后运行：
+离线回滚前停止目标 DSH 写入进程。在已构建检出中，将 `DSH_HOME`、`WIKI_PATH` 与 `MEDIA_DESK_MIGRATION_ID` 设置为已停止 profile 的 home、Wiki 和已验证备份 ID，再执行：
 
 ```sh
 node src/notes-rollback.js "$MEDIA_DESK_MIGRATION_ID"
 ```
 
-该命令验证并恢复备份数据，随后报告迁移后备份与存活证据的保留位置。新 Notes 文件、移出的编辑器字节和原生 Session 日志继续保留。重启前用旧包配合恢复的迁移前数据；不要让旧包读取 Notes 引用格式。
+回滚验证并恢复迁移前数据，同时保留迁移后文件、被移开的编辑器证据与原生 Session 日志。使用旧包和恢复后的数据重启；旧包不能安全读取新的 Notes 引用格式。
 
-<br>
+<a id="costs-and-limits"></a>
+## 费用与限制
 
-## 灵感墙
+插件不提供模型凭据。文字使用原生 Session 模型账号，图片使用所选服务或订阅额度。凭据保存在私有 DSH／设置存储中。提供方可用性、事实准确性和写作质量需单独检查。同机目录协作锁约束 Media Desk Host；普通编辑器通过字节核对与保留版本恢复处理。不支持跨机器共享目录写入，也不保证外部请求只计费一次。
 
-<table>
-<tr>
-<td valign="top" width="38%">
-<p><b>一句话，一个灵感。</b></p>
-<p>文字、链接、图片、视频、金句，贴进来就是一张卡片。散落在无限画布上，或者切成按时间排的信息流。</p>
-<p><b>相关的灵感自己凑过来。</b></p>
-<p>在中间输入「agent」回车，新灵感记下的同时，以前提到 agent 的灵感会按相关程度挪到它旁边，一眼看全。</p>
-<p><b>右边有个助手。</b></p>
-<p>「把今天最好的灵感一键成稿」「接下来有什么排期」「以后标题都不要超过 20 个字」，一句话就办。</p>
-</td>
-<td>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/f-home-dark.webp">
-    <img src="docs/assets/f-home-light.webp" width="100%" alt="灵感墙的散落视图和信息流视图">
-  </picture>
-</td>
-</tr>
-</table>
+<a id="further-exploration"></a>
+## 进一步阅读
 
-<br>
+- [包约定与开发](README.zh.md)
+- [原项目](https://github.com/woniuniuniu/dsh-media-desk)
+- [MIT 许可与原作者归属](LICENSE)
 
-## 排期
+### 开发笔记
 
-<table>
-<tr>
-<td width="62%">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/f-schedule-dark.webp">
-    <img src="docs/assets/f-schedule-light.webp" width="100%" alt="排期日历，右边是下一条和待排期的内容">
-  </picture>
-</td>
-<td valign="top">
-<p><b>一张日历，两件事。</b></p>
-<p>每天一张灵感邮票，记录你的连续天数；做好的稿子从右边拖到某一天，就排好了。</p>
-<p>右上角永远是下一条要发的。</p>
-</td>
-</tr>
-</table>
-
-<br>
-
-## 复盘
-
-<table>
-<tr>
-<td valign="top" width="38%">
-<p><b>数据进来，规则出去。</b></p>
-<p>手动录入、粘贴 CSV，或者导入你自己的账号。趋势、平台分布、表现最好的内容，一眼看完。</p>
-<p>从数据里提炼出来的建议，点一下就写进写作规则，以后每篇都遵守。规则还能导出成 DeepSeek Harness 的 Skill。</p>
-</td>
-<td>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/f-insights-dark.webp">
-    <img src="docs/assets/f-insights-light.webp" width="100%" alt="复盘页：一句话总结、每日播放、平台分布、最好的内容和建议">
-  </picture>
-</td>
-</tr>
-</table>
-
-<br>
-
-## 风格
-
-<table>
-<tr>
-<td width="62%">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/f-style-dark.webp">
-    <img src="docs/assets/f-style-light.webp" width="100%" alt="风格页的分板块预设，和内容管理看板">
-  </picture>
-</td>
-<td valign="top">
-<p><b>按谁的风格写，你定。</b></p>
-<p>科技数码、旅行探店、Vlog 生活、观点认知、干货教程、种草测评、情感故事、热点资讯，8 个板块 15 种博主预设，选一种就能开写。</p>
-<p><b>也可以是你自己的。</b></p>
-<p>导入自己的账号，或者贴几篇写过的稿子，提炼成专属风格卡，随时改。</p>
-<p>内容页把所有稿子按灵感、成稿、待发布、已发布排好。</p>
-</td>
-</tr>
-</table>
-
-<br>
-
-<a id="get-started"></a>
-## 三步上手
-
-要求 DeepSeek Harness `0.2.1-rc.5` 及以上的 `0.2.x`，已在 `0.2.2-rc.1` 的桌面版和网页版上测过。
-
-**1. 安装。** 打开 DeepSeek Harness 桌面版，进「插件」→「添加插件」，输入包名 `dsh-media-desk`，点安装。
-
-也可以用命令行。桌面版要先完全退出（⌘Q）再装，装好重新打开；网页版装好后重启 `dsh web`。终端里没有 `dsh` 的话，先在桌面版菜单里选「管理 dsh 命令」。
-
-```bash
-dsh plugin --profile desktop add dsh-media-desk
-```
-
-```bash
-dsh plugin --profile web add dsh-media-desk
-```
-
-**2. 更新。** 有新版本时，在插件页点更新，或者重新执行一次上面的命令。想离线安装的话，也可以到 [Releases](https://github.com/woniuniuniu/dsh-media-desk/releases/latest) 下载 `dsh-media-desk-*.tgz`，把包名换成 `"file:$PWD/dsh-media-desk-版本号.tgz"`。
-
-**3. 打开。** 侧栏会出现「自媒体工作台」。第一次看到的都是示例数据，方便你先看看每个页面长什么样；点右上角「示例数据 · 清空」，换成自己的。
-
-卸载时把 `add` 换成 `remove dsh-media-desk`。你的内容一直在 `~/.dsh/media-desk/`，不会跟着删。
-
-<br>
-
-<a id="what-it-costs"></a>
-## 要花钱吗
-
-插件本身免费开源，不带任何密钥。用到模型的地方，走你自己的账号。
-
-| | 用什么 | 不接会怎样 |
-| --- | --- | --- |
-| **写脚本** | DeepSeek Harness 里你已经配好的模型 | 只能出结构草稿 |
-| **画封面、配图、分镜** | 自己的生图 API Key，或 DSH 已注册的订阅生图工具，在插件设置里选 | 脚本和分镜文案照常，封面变成纯文字版 |
-| **导入自己的账号**（可选） | 第三方服务 Monid，按次计费：小红书一个账号约 0.02 美元（一毛多），抖音、B 站、TikTok、Instagram、X 不到 1 美分 | 手动录数据，或贴内容提炼风格 |
-
-生图支持任何兼容 OpenAI 图片接口（`POST {接口地址}/images/generations`）的服务，设置里预填了 OpenAI、xAI、火山方舟、智谱、硅基流动，也可以自定义。填好点「试画一张」就知道通没通。一次成稿默认 9 张图，数量可调。密钥只存在本机的 `settings.json`，权限 600，不进内容数据，也不会发给文字模型。
-
-<br>
-
-### 使用 DSH 生成工具
-
-复用插件接入 DSH 的订阅生图能力。例如，插件已让你通过 ChatGPT（GPT）订阅在 DSH 中生成图片，工作台就可复用，无需另填图片 API Key。其他国内外服务的订阅也需由插件接入生图功能，并在工作台适配范围内；仅登录订阅或接入聊天模型并不代表支持生图。当前适配 `dsh-plugin-subscriptions`，使用的服务、账号及回退规则由该插件决定。
-
-在设置中将「生图来源」切换到「DSH 生成工具」，可以复用 `dsh-plugin-subscriptions` 注册的 `image_generate`（含其同名冲突别名）。不需要再填 API Key；原来的 HTTP 配置（含尺寸、质量）会保留，工具的尺寸、质量单独设置，默认来源仍是图片 API。检测只确认兼容工具已注册且默认执行器公布了直接调用入口，不保证账号登录或额度；点「试画一张」会发起真实请求并消耗订阅额度。名称和参数校验不是插件身份认证，请只启用可信的工具插件。
-
-需要宿主支持 `tools.executable()`、`tools.selectExecutor().describe()` 和独立服务的 `tools.execute()` 批量调用（已核对 DSH 0.2.2-rc.1 公共接口）。工作台通过宿主执行管线调用工具，不读取订阅凭证、不依赖订阅插件内部模块。输出仅导入 DSH 主目录 `plugins/subscriptions/images/` 内的图片，然后沿用工作台原有保存/展示流程。当前仅识别 `dsh_subscriptions_image_generate` 和 `image_generate`，不扫描任意名称的工具；其他插件即便使用同名工具，也仍需匹配参数、返回结构与输出目录。仅注册在某个 Agent 私有作用域中的工具不可用。
-
-这是工作台的独立后台操作，不继承当前聊天会话的权限、历史开关或账号偏好；宿主全局工具策略与订阅插件当前开关仍生效。需要人工审批但没有可用会话时，宿主会拒绝调用。工具使用自己的默认提供方、账号选择及回退规则（例如 ChatGPT 未登录时可能使用 Grok），工作台不会在失败后自动换到 HTTP，也不额外重试工具请求。
-
-当前纯 Code Mode / PTC 执行器不接受直接的根生图工具调用，会被检测为不可用；请使用支持直接调用的原生工具执行器或保留 HTTP 生图。未安装工具或旧宿主不支持上述接口时，原有 HTTP 功能不受影响。
-
-## 导入自己的账号
-
-「风格」或「复盘」页点「导入账号」，贴上自己的主页链接，支持小红书、抖音、B 站、TikTok、Instagram 和 X。读最近的公开内容和互动数据，进内容和复盘，顺便提炼成你的风格。再导入一次只更新数字。
-
-第一次用要接 [Monid](https://monid.ai)，三步：
-
-1. 把 `set up https://monid.ai/SKILL.md` 发给 DeepSeek Harness 的新会话，它会装好。
-2. 到 [app.monid.ai](https://app.monid.ai/access/api-keys) 注册，创建密钥。
-3. 在终端执行 `monid keys add -k 你的密钥 -l main`。密钥别发在聊天里。
-
-插件只调用本机的 `monid` 命令，不碰密钥。
-
-<br>
-
-<a id="faq"></a>
-## 问答
-
-<details>
-<summary><b>只能导入自己的账号吗？</b></summary>
-<br>
-
-是。链接会发给 Monid 和它的数据服务商，请确认符合你和平台的条款。只能读到公开内容：小红书和抖音读不到播放量，复盘会改按互动算；小红书正文约 100 字，抖音是文案，B 站大多只有标题，提炼出的风格可以再手动改。公众号、视频号、YouTube 暂时导入不了，可以照常排期，风格可以贴内容或公开链接来提炼。
-
-</details>
-
-<details>
-<summary><b>能直接发布吗？</b></summary>
-<br>
-
-不能。各平台没有统一接口，复制脚本或保存文件夹后自己发。保存的文件夹默认在 `~/Documents/自媒体工作台/`，里面有脚本、分镜脚本、视频封面、配图和分镜图。
-
-</details>
-
-<details>
-<summary><b>我的东西存在哪？</b></summary>
-<br>
-
-全在本机 `~/.dsh/media-desk/`，桌面版和网页版共用。没有云端，没有账号系统。
-
-</details>
-
-<details>
-<summary><b>没有生图模型也能用吗？</b></summary>
-<br>
-
-能。脚本、标题、分镜文案照常，视频封面会用封面大字合成一张纯文字版。接上生图模型后，封面、配图和分镜图都会画出来。
-
-</details>
-
-<details>
-<summary><b>这是 DeepSeek 做的吗？</b></summary>
-<br>
-
-不是，是社区插件。脚本由你在 DeepSeek Harness 里配置的模型生成，按你自己的账户计费。
-
-</details>
-
-<br>
-
-## 作者
-
-我是 [蜗牛的科技笔记](https://www.xiaohongshu.com/user/profile/5faedce8000000000101c8a3)，在小红书做科技内容，小红书号 `1097519508`。这个工作台是我自己每天用的：灵感记不住、成稿太慢、发完不知道效果，这三件事我都踩过，所以做成了这样。用得顺手或者不顺手，欢迎提 [Issue](https://github.com/woniuniuniu/dsh-media-desk/issues)，也欢迎来小红书找我聊。
-
-## 致谢
-
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 团队，做了这套开放的插件系统，这个工作台才装得进去。
-- [dsh-Go](https://github.com/ccch1mneyyy/dsh-Go)，这份 README 的图文排版参考了它。
-
-### 特别感谢
-
-谢谢这些朋友认真试用、细心排查、动手修代码：
-
-- [secountAiAccount](https://github.com/secountAiAccount)：发现深色模式下风格下拉框看不清（[#1](https://github.com/woniuniuniu/dsh-media-desk/issues/1)），设置图标容易被当成切换深浅色（[#2](https://github.com/woniuniuniu/dsh-media-desk/issues/2)）
-- [isxiaokunos](https://github.com/isxiaokunos)：定位到生图网关返回相对地址时必定失败、误报和白白重画的根因，还附上了补丁和实测数据（[#3](https://github.com/woniuniuniu/dsh-media-desk/issues/3)）
-- [townmi（Harry Tang）](https://github.com/townmi)：查清 opencode-go 网关缺少会话头导致模型调用失败，并指出面板误报「模型未连接」（[#4](https://github.com/woniuniuniu/dsh-media-desk/issues/4)）
-- [zach22-1999](https://github.com/zach22-1999)：修好了 X 帖子媒体字段格式不一时导入崩溃的问题（[#6](https://github.com/woniuniuniu/dsh-media-desk/pull/6)）
-- [chenxupeng1990-eng](https://github.com/chenxupeng1990-eng)：让助手可以在工作台里自选模型，不必跟随 DSH 默认模型（[#5](https://github.com/woniuniuniu/dsh-media-desk/pull/5)）
-- [dsh-agent-sixtyseven](https://github.com/dsh-agent-sixtyseven)：查清 Windows 上导入账号一直显示「还没装好 Monid」的两处根因，并修好了定位和调用（[#7](https://github.com/woniuniuniu/dsh-media-desk/issues/7)、[#8](https://github.com/woniuniuniu/dsh-media-desk/pull/8)）
-- [smallflycar](https://github.com/smallflycar)：让工作台可以直接用 GPT 订阅生图，不用再另配图片 API（[#9](https://github.com/woniuniuniu/dsh-media-desk/pull/9)）
-
-欢迎大家继续[提 issue](https://github.com/woniuniuniu/dsh-media-desk/issues)，每一条都会认真看。
-
-### 贡献者
-
-谢谢每一位提交过代码的朋友：
-
-[![贡献者](https://contrib.rocks/image?repo=woniuniuniu/dsh-media-desk)](https://github.com/woniuniuniu/dsh-media-desk/graphs/contributors)
-
-## 开发
-
-```bash
-npm install && npm test
-npm run watch
-scripts/dev-sandbox.sh
-node scripts/mock-llm.mjs
-npm pack
-```
-
-`scripts/mock-monid.mjs` 是假的 `monid` 命令，内容全是编的，用来不花钱测导入流程：包成名为 `monid` 的可执行文件放到 `PATH` 最前面。
-
-| 目录 | 内容 |
-| --- | --- |
-| `client/` | 界面：灵感墙、成稿、对话、内容、排期、复盘、风格、设置 |
-| `src/` | Host 接口、成稿流水线、提示词、生图、风格提炼、Monid 导入、本地存储 |
-| `scripts/` | 打包、沙盒、模拟模型、示例素材生成 |
-| `assets/` | 示例图片和视频，全部由 `scripts/gen-assets.py` 程序绘制 |
-| `docs/assets/` | 本页的展示图 |
-
-改了 `src/` 要重启 DeepSeek Harness。
-
-**安全：** 每个接口都经过 Host 鉴权；模型输出和读到的外部内容只取固定字段、限制长度，操作走白名单；粘贴的链接不能访问本机和内网；调用 `monid` 不经过 shell，账号 ID 只接受固定格式。漏洞请走 [Security Advisories](https://github.com/woniuniuniu/dsh-media-desk/security/advisories/new) 私下报告。
-
-<br>
-
-<p align="center"><sub><a href="LICENSE">MIT</a> · 社区插件，与 DeepSeek 无关。DeepSeek Harness 的名称和标识归其所有者所有。</sub></p>
+无。

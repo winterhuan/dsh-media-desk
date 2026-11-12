@@ -1,12 +1,11 @@
 // 风格：按博主类型分板块的预设，加上从自己账号提炼的专属风格。选哪张，就按哪张写。
 import React from 'react'
 import { dispatchOps, exportSkills, extractStyle, learnSkills, setDesk, useDesk } from './desk.js'
-import { ConnectDialog } from './connect.jsx'
 import { lang, t, useLang } from './i18n.js'
 import { Dialog, Icon, IconButton } from './ui.jsx'
 import { STYLE_CATEGORIES, hash, styleIcon } from './util.js'
 
-function AddStyleDialog({ initialTab, onClose, onConnect }) {
+function AddStyleDialog({ initialTab, onClose }) {
   const [tab, setTab] = React.useState(initialTab)
   const [text, setText] = React.useState('')
   const [urls, setUrls] = React.useState('')
@@ -35,7 +34,7 @@ function AddStyleDialog({ initialTab, onClose, onConnect }) {
           <label className="md-field">
             <span>{t('链接')}</span>
             <textarea rows={4} required value={urls} onChange={e => setUrls(e.target.value)} placeholder={t('你自己发过的内容链接\n一行一个，最多 5 个')} />
-            <small>{t('只读公开页面。小红书、抖音、B 站和 TikTok、Instagram、X 要登录才能看，')}<button type="button" className="md-inline-link" onClick={onConnect}>{t('改用导入账号')}</button>{t('。')}</small>
+            <small>{t('公开页面无法读取时，请粘贴你选定的样文')}</small>
           </label>
         )}
         <label className="md-field">
@@ -105,7 +104,6 @@ export function StyleView() {
   const activeId = useDesk(s => s.state.activeStyleId)
   const skills = useDesk(s => s.state.skills)
   const [adding, setAdding] = React.useState(null)
-  const [connecting, setConnecting] = React.useState(false)
   const [category, setCategory] = React.useState('全部')
   const active = styles.find(row => row.id === activeId)
   const mine = styles.filter(row => !row.preset)
@@ -132,10 +130,9 @@ export function StyleView() {
         <section className="md-tile md-i-hero md-style-hero">
           <div className="md-hero-copy">
             <h1 className="md-i-line">
-              {active ? <>{t('现在按')} <span className="md-inline-emoji" aria-hidden="true">{styleIcon(active)}</span> <b>{active.name}</b> {t('的风格写。')}</> : <>{t('选一种预设直接开写，')}<br />{t('或者抓自己的账号，提炼你的风格。')}</>}
+              {active ? <>{t('现在按')} <span className="md-inline-emoji" aria-hidden="true">{styleIcon(active)}</span> <b>{active.name}</b> {t('的风格写。')}</> : <>{t('选一种预设直接开写，')}<br />{t('或者选定自己的样文，提炼你的风格。')}</>}
             </h1>
             <div className="md-hero-actions">
-              <button type="button" className="md-pill is-primary" onClick={() => setConnecting(true)}><Icon name="user" size={14} />{t('抓我的账号')}</button>
               <button type="button" className="md-pill" onClick={() => setAdding('text')}><Icon name="pen" size={14} />{t('贴内容')}</button>
               <button type="button" className="md-pill" onClick={() => setAdding('url')}><Icon name="link" size={14} />{t('贴链接')}</button>
             </div>
@@ -175,8 +172,7 @@ export function StyleView() {
           </ul>
         </section>
       </div>
-      {adding ? <AddStyleDialog initialTab={adding} onClose={() => setAdding(null)} onConnect={() => { setAdding(null); setConnecting(true) }} /> : null}
-      {connecting ? <ConnectDialog onClose={() => setConnecting(false)} /> : null}
+      {adding ? <AddStyleDialog initialTab={adding} onClose={() => setAdding(null)} /> : null}
     </div>
   )
 }

@@ -1,6 +1,7 @@
 // 一键保存：把成稿写成一个普通文件夹，脚本、封面、配图和分镜都在里面。
 import { existsSync } from 'node:fs'
-import { copyFile, mkdir, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { extname, join } from 'node:path'
 import { currentLang, tr } from './i18n.js'
@@ -32,29 +33,45 @@ function cell(text) {
  * @param {{filesDir: string, exportDir: string, videoCover?: Buffer}} options - 素材目录、保存位置和合成好的视频封面。
  * @returns {Promise<{path: string, files: string[]}>} 文件夹路径和写入的文件名。
  */
-export async function saveProduction(production, { filesDir, exportDir, videoCover }) {
+export async function saveProduction(production, { filesDir, exportDir, videoCover, resolveMedia, snapshot = {} }) {
   // 英文界面用纯 ASCII 文件名，方便在别的系统和工具里打开
   const en = currentLang() === 'en'
   const names = en
     ? { cover: 'cover-original', videoCover: 'video-cover.jpg', figure: i => `figure-${i}`, shot: n => `shot-${n}`, script: 'script.md', board: 'storyboard.md' }
     : { cover: '封面原图', videoCover: '视频封面.jpg', figure: i => `配图${i}`, shot: n => `分镜${n}`, script: '脚本.md', board: '分镜脚本.md' }
-  const target = production.savedPath || join(exportDir, folderName(production.title))
-  await mkdir(target, { recursive: true })
+  await mkdir(exportDir, { recursive: true })
+  const target = await mkdtemp(join(exportDir, folderName(production.title) + '-'))
   const files = []
+  const manifest = { version: 1, createdAt: new Date().toISOString(), ...snapshot, title: production.title, coverText: production.coverText, sources: production.sources ?? [], media: [], missing: [] }
+  const fingerprint = bytes => createHash('sha256').update(bytes).digest('hex')
 
   const copy = async (asset, name) => {
-    const match = /^media-desk\/files\/([\w.-]+)$/.exec(asset?.src ?? '')
-    if (!match) return null
-    const file = `${name}${extname(match[1])}`
-    await copyFile(join(filesDir, match[1]), join(target, file))
+    if (!asset?.src) { manifest.missing.push({ name, status: asset?.status ?? 'absent', error: asset?.error }); return null }
+    const legacy = /^media-desk\/files\/([\w.-]+)$/.exec(asset.src)
+    const registered = /^media-desk\/media\/([a-f0-9-]{36})$/.exec(asset.src)
+    let source
+    let bytes
+    try {
+      if (registered && resolveMedia) source = await resolveMedia(registered[1])
+      else if (legacy) source = join(filesDir, legacy[1])
+      else { manifest.missing.push({ name, status: 'unregistered' }); return null }
+      bytes = await readFile(source)
+    } catch (error) { manifest.missing.push({ name, status: 'unavailable', error: error.message }); return null }
+    const sha256 = fingerprint(bytes)
+    if (asset.media && asset.media.sha256 !== sha256) { manifest.missing.push({ name, status: 'changed' }); return null }
+    const file = name + extname(source)
+    await writeFile(join(target, file), bytes, { flag: 'wx' })
     files.push(file)
+    manifest.media.push({ file, sha256, reference: asset.media ?? { src: asset.src } })
     return file
   }
 
   const cover = await copy(production.cover, names.cover)
   if (videoCover) {
+    if (production.cover?.src && !cover) throw new Error('The original cover is unavailable; regenerate the composed cover before export')
     await writeFile(join(target, names.videoCover), videoCover)
     files.push(names.videoCover)
+    manifest.videoCover = { file: names.videoCover, sha256: fingerprint(videoCover), source: production.cover?.media ?? null, text: production.coverText || production.title }
   }
   const figures = []
   for (const [i, image] of (production.images ?? []).entries()) {
@@ -86,5 +103,11 @@ export async function saveProduction(production, { filesDir, exportDir, videoCov
     await writeFile(join(target, names.board), `${heading}\n| --- | --- | --- | --- | --- | --- |\n${rows.join('\n')}\n`)
     files.push(names.board)
   }
-  return { path: target, files }
+  const sources = production.sources ?? []
+  await writeFile(join(target, 'sources.md'), sources.map(row => `- ${row.title}: ${row.reference} (${row.date}) — ${row.limitations}`).join('\n') + '\n', { flag: 'wx' })
+  files.push('sources.md')
+  manifest.articleSha256 = fingerprint(Buffer.from(production.article ?? ''))
+  await writeFile(join(target, 'manifest.json'), JSON.stringify(manifest, null, 2), { flag: 'wx' })
+  files.push('manifest.json')
+  return { path: target, files, missing: manifest.missing }
 }

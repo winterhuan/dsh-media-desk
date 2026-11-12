@@ -203,26 +203,7 @@ test('Producer readiness uses injected capability and tool failures are not retr
   const settings = new Settings(store.root)
   await settings.update({ image: { source: 'tool' }, imageCount: 1, shotCount: 1 })
   const ctx = context(async batch => success(batch, path))
-  const producer = new Producer({ store, settings, ready: saved => imageReady(saved, Boolean(imageTool(ctx))), generate: (image, prompt, options) => generateToolImage(ctx, image, prompt, options), callText: async () => { throw new Error('offline') } })
-  const state = await store.read()
-  const id = state.items[0].id
-  await store.mutate('test', draft => { draft.items.find(row => row.id === id).production = {}; return draft })
-  await producer.run(id, { controller: new AbortController(), planText: '', text: '' })
-  const done = (await store.read()).items.find(row => row.id === id).production
-  assert.equal(done.status, 'done')
-  assert.equal(done.cover.status, 'done')
-  assert.ok(done.cover.src)
-  assert.equal(done.images[0].status, 'done')
-  assert.equal(done.shots[0].status, 'done')
-  assert.equal(done.needsProvider, undefined)
-  let redrawn = 0
-  const generate = producer.generate
-  producer.generate = async (...args) => { redrawn++; return generate(...args) }
-  await producer.regenerate(id, 'image:0')
-  // regenerate is intentionally detached; drain this test's asset before cleanup.
-  while (producer.assets.size) await new Promise(resolve => setTimeout(resolve, 5))
-  assert.equal(redrawn, 1)
-  assert.equal((await store.read()).items.find(row => row.id === id).production.images[0].status, 'done')
+  const producer = new Producer({ store, settings, ready: saved => imageReady(saved, Boolean(imageTool(ctx))), generate: (image, prompt, options) => generateToolImage(ctx, image, prompt, options) })
   assert.equal(producer.ready(await settings.read()), true)
   let attempts = 0
   producer.generate = async () => { attempts++; throw Object.assign(new Error('429'), { permanent: true }) }

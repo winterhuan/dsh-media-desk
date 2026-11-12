@@ -27,7 +27,7 @@ export async function nativeRuntime(t, options = {}) {
   const telemetryPath = join(root, 'model-requests.jsonl')
   const overlay = join(root, 'overlay.json')
   const env = { ...process.env, DSH_HOME: home, DSH_AGENTS_HOME: agents, WIKI_PATH: wiki, ...options.env }
-  let child, exited, stopping, cookie, baseUrl
+  let child, exited, stopping, cookie, baseUrl, loginUrl
   const connections = new Set()
   /** Connections receive the stop signal first; surviving crash observers close after child exit. */
   const trackConnection = close => {
@@ -113,6 +113,7 @@ export async function nativeRuntime(t, options = {}) {
     })
     current.stdout.on('data', chunk => { log = (log + chunk.toString()).slice(-4 * 1024 * 1024) })
     current.stderr.on('data', chunk => { log = (log + chunk.toString()).slice(-4 * 1024 * 1024) })
+    loginUrl = authenticatedUrl
     baseUrl = new URL(authenticatedUrl).origin
     const login = await fetch(authenticatedUrl, { redirect: 'manual', signal: AbortSignal.timeout(10000) })
     cookie = login.headers.get('set-cookie')?.split(';')[0]
@@ -206,8 +207,8 @@ export async function nativeRuntime(t, options = {}) {
     if (!accepted.ok) throw new Error(JSON.stringify(accepted.error))
     return requestId
   }
-  const turn = async (sessionId, requestId) => {
-    const deadline = Date.now() + 60000
+  const turn = async (sessionId, requestId, timeoutMs = 60000) => {
+    const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       const log = await events(sessionId)
       const index = log.findIndex(event => event.type === 'user/message' && event.data.source?.rpcId === requestId)
@@ -220,5 +221,5 @@ export async function nativeRuntime(t, options = {}) {
     }
     throw new Error('Native input did not reach a persisted turn end: ' + requestId + '\n' + log)
   }
-  return { root, wiki, home, agents, telemetryPath, dsh, start, stop, trackConnection, host, rpc, events, interactions, prompt, turn, get url() { return baseUrl }, get log() { return log } }
+  return { root, wiki, home, agents, telemetryPath, dsh, start, stop, trackConnection, host, rpc, events, interactions, prompt, turn, get url() { return baseUrl }, get loginUrl() { return loginUrl }, get log() { return log } }
 }

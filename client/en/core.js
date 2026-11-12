@@ -43,6 +43,7 @@ export const CORE = {
   '想到什么就写什么，之后再让助手补全。': 'Write whatever comes to mind. The assistant can fill in the rest.',
   '放到灵感墙': 'Add to wall',
 
+  '开始新对话': 'Start a new conversation',
   // 通用
   '取消': 'Cancel',
   '保存': 'Save',

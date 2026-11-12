@@ -8,22 +8,22 @@ import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { pipeline } from 'node:stream/promises'
 import { Service } from '@deepseek-ai/cordis'
-import { assistantModelOverride, callModel, chatPrompts, defaultSelection, extractJson, modelInfo, modelStatus, setAssistantModel } from './ai.js'
+import { assistantModelOverride, defaultSelection, modelInfo, setAssistantModel } from './ai.js'
 import { defaultExportDir, resolveExportDir, saveProduction } from './export.js'
 import { harvest, harvestText } from './harvest.js'
 import { generateImage } from './images.js'
 import { generateToolImage, imageTool } from './image-tool.js'
-import { localIntent } from './intents.js'
-import { computeInsights, exportSkill, proposeRules } from './learn.js'
-import { createMonidRunner, fetchAccount, importPosts, monidStatus, postsToMaterial, resolveAccount, saveCovers } from './monid.js'
+import { computeInsights, exportSkill } from './learn.js'
 import { applyOps, newId } from './ops.js'
-import { applyRevision, Producer } from './produce.js'
+import { Producer } from './produce.js'
 import { publicSettings, Settings, imageReady } from './settings.js'
-import { normalizeStyle, stylePrompts } from './style.js'
+import { stylePrompts } from './style.js'
 import { dshHome, Store } from './store.js'
 import { currentLang, platformName, tr, withLang } from './i18n.js'
 import { samplesNeedLocale } from './seed.js'
 import { NativeSessions } from './native-sessions.js'
+import { NativeWork } from './native-work.js'
+import { MediaFiles } from './media-files.js'
 import { Notes, notesSaveMessage } from './notes.js'
 import { WriteOwner } from './write-owner.js'
 
@@ -32,7 +32,7 @@ const MAX_JSON = 4_000_000
 const MAX_UPLOAD = 250_000_000
 const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' }
 const UPLOAD_EXT = Object.fromEntries(Object.entries(MIME).filter(([ext]) => ext !== '.jpeg').map(([ext, type]) => [type, ext]))
-const SERIAL_ROUTES = new Set(['ops', 'undo', 'settings', 'upload', 'produce', 'produce/cancel', 'produce/regen', 'produce/save', 'skills/export', 'notes/register', 'notes/relink', 'notes/retry', 'notes/resolve', 'notes/version', 'notes/saves', 'notes/migrate', 'notes/migrations', 'notes/language', 'chat/clear', 'sessions/open', 'sessions', 'state', 'production'])
+const SERIAL_ROUTES = new Set(['ops', 'undo', 'settings', 'upload', 'produce', 'produce/regen', 'produce/save', 'skills/export', 'notes/register', 'notes/relink', 'notes/retry', 'notes/resolve', 'notes/version', 'notes/saves', 'notes/migrate', 'notes/migrations', 'notes/language', 'sessions/open', 'sessions', 'state', 'production'])
 const editsPreferenceText = ops => (Array.isArray(ops) ? ops : []).some(op => op?.op === 'update_style'
   || op?.op === 'update_skill' && ['name', 'rule', 'source', 'evidence'].some(key => op[key] !== undefined))
 
@@ -108,87 +108,17 @@ function engineLabel(ctx) {
   return info ? info.label : null
 }
 
-/** 同一次故障只提醒一次，用人话说。原始错误放在模型状态的提示里。 */
-function outageNotice(ctx, wasDown, fallback) {
-  if (wasDown) return null
-  return modelInfo(ctx) ? tr('模型暂时用不了，{fallback}。可以到设置里检查账号或密钥。', { fallback }) : tr('当前没有连接模型，{fallback}。', { fallback })
-}
-
 async function chatTurn(ctx, store, desk, body) {
   const message = String(body.message || '').trim()
-  if (!message) throw Object.assign(new Error(tr('消息为空')), { status: 400 })
-  const focusId = typeof body.focusId === 'string' ? body.focusId : undefined
+  if (!message || message.length > 200000) throw Object.assign(new Error(tr('消息为空')), { status: 400 })
+  const workId = typeof body.focusId === 'string' ? body.focusId : null
   const state = await store.read()
   store.notes.assertExpected(state, body.expectedContent ?? {})
-  const snapshot = JSON.parse(JSON.stringify(state))
-  let plan
-  let engine = 'local'
-  let notice = null
-  const wasDown = modelStatus.ok === false
-  try {
-    const history = snapshot.chat.filter(row => (row.itemId ?? null) === (focusId ?? null))
-    const { system, user } = chatPrompts(snapshot, message, { focusId, history })
-    const editing = snapshot.items.find(row => row.id === focusId)?.production?.status === 'done'
-    const { text, model } = await callModel(ctx, { system, user, maxTokens: editing ? 8000 : 2000, light: true, signal: AbortSignal.any([desk.ownership.signal, AbortSignal.timeout(editing ? 240_000 : 90_000)]) })
-    engine = model
-    try {
-      plan = extractJson(text)
-      if (typeof plan.reply !== 'string') plan.reply = tr('处理好了。')
-    } catch {
-      // 模型只回了一段话时，当成普通回答，不算失败
-      plan = { reply: text.trim().slice(0, 1200) || tr('我没有听懂，可以换个说法吗？'), ops: [] }
-    }
-  } catch {
-    desk.ownership.signal.throwIfAborted()
-    notice = outageNotice(ctx, wasDown, tr('先用本地规则处理'))
-    plan = localIntent(snapshot, message, { focusId })
-  }
-  const settings = await desk.settings.read()
-  const canDraw = desk.producer.ready(settings)
-  const affected = new Set((Array.isArray(plan.ops) ? plan.ops : []).map(op => op?.id))
-  if (focusId && plan.revise) affected.add(focusId)
-  const expectedContent = Object.fromEntries(snapshot.items.filter(item => item.content && affected.has(item.id)).map(item => [item.id, item.content]))
-  // 只把真正改了数据的那一步放进撤销；问一句话不占撤销位
-  const changed = await store.mutate(tr('对话：{text}', { text: message.slice(0, 18) }), (draft) => {
-    const target = focusId ? draft.items.find(row => row.id === focusId) : null
-    const production = target?.production?.status === 'done' ? target.production : null
-    // 本地规则只会改灵感标题；有成稿时要改的是成稿标题
-    const ops = (Array.isArray(plan.ops) ? plan.ops : []).map((op) => {
-      if (production && op?.op === 'update_item' && op.id === focusId && typeof op.title === 'string') return { op: 'update_production', id: focusId, title: op.title }
-      return op
-    })
-    const { receipts, errors } = applyOps(draft, ops)
-    let targets = []
-    if (production && plan.revise) {
-      // 没接生图时，图不会重画，回执要说实话
-      const revision = applyRevision(production, plan.revise, { canDraw })
-      receipts.push(...revision.receipts.map(text => ({ text })))
-      errors.push(...revision.errors)
-      targets = canDraw ? revision.targets : []
-    }
-    return { receipts, errors, targets, done: Boolean(production) }
-  }, { undoable: !editsPreferenceText(plan.ops), expectedContent, resultKey: newId('chat'),
-    payloadHash: createHash('sha256').update(JSON.stringify({ message, focusId, plan, expectedContent })).digest('hex') })
-  const result = await store.mutate('对话记录', (draft) => {
-    const { receipts, errors, targets, done } = changed
-    const at = new Date().toISOString()
-    const itemId = focusId ?? undefined
-    const undoId = draft.notesUndo?.find(entry => entry.id === changed.acceptance.id)?.id ?? null
-    // 已经做好的成稿不会因为一句话被整篇重做，要重做请点「重新成稿」
-    const actions = (Array.isArray(plan.actions) ? plan.actions : [])
-      .filter(a => a && ['produce', 'open', 'nav'].includes(a.type))
-      .filter(a => !(a.type === 'produce' && (done && a.id === focusId || draft.items.find(row => row.id === a.id)?.production?.status === 'done')))
-    draft.chat.push({ id: newId('c'), at, role: 'user', text: message, itemId })
-    const answer = { id: newId('c'), at, role: 'assistant', text: plan.reply, receipts, errors, engine, notice, undoable: Boolean(undoId), undoId, itemId }
-    draft.chat.push(answer)
-    draft.chat = draft.chat.slice(-300)
-    return { answer, actions, targets, state: draft, modelOk: modelStatus.ok, modelError: modelStatus.error }
-  }, { undoable: false })
-  if (canDraw) {
-    await Promise.all(result.targets.map(target => desk.producer.regenerate(focusId, target).catch(() => {})))
-    return { ...result, state: await store.read() }
-  }
-  return result
+  const association = await desk.nativeSessions.open(workId)
+  const requestId = newId('native-chat')
+  await desk.nativeSessions.service('sessionController').prompt({ sessionId: association.sessionId, requestId, mode: body.mode === 'steer' ? 'steer' : 'queue',
+    content: [{ type: 'text', text: message }] }, desk.ownership.signal)
+  return { association, requestId, state }
 }
 
 async function extractStyle(ctx, store, body, signal) {
@@ -214,56 +144,13 @@ async function extractStyle(ctx, store, body, signal) {
   return styleFromMaterial(ctx, store, { material, name, source, sourceUrls: urls, failures, signal })
 }
 
-/** 提炼一张风格卡并设为当前风格。同一个账号再抓一次时更新原来那张。 */
-async function styleFromMaterial(ctx, store, { material, name, source, sourceUrls = [], failures = [], accountKey = null, signal }) {
-  let style
-  try {
-    const { system, user } = stylePrompts(material, name)
-    const { text } = await callModel(ctx, { system, user, maxTokens: 1500, light: true, signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]) })
-    style = normalizeStyle(extractJson(text), name)
-  } catch (err) {
-    throw Object.assign(new Error(tr('提炼风格需要文字模型：{error}', { error: err.message })), { status: 502 })
-  }
-  return store.mutate(tr('提炼风格「{name}」', { name: style.name }), (draft) => {
-    const existing = accountKey ? (draft.styles ?? []).find(row => row.accountKey === accountKey) : null
-    const id = existing?.id ?? newId('st')
-    const createdAt = existing?.createdAt ?? new Date().toISOString()
-    const row = { id, ...style, source, sourceUrls, ...(accountKey ? { accountKey } : {}), createdAt,
-      sampleMaterial: { title: `${style.name} · ${tr('作者样文')}`, body: material, source, url: sourceUrls[0], collectedAt: new Date().toISOString(),
-        materialType: 'author-sample', completeness: sourceUrls.length ? 'complete' : 'excerpt', externalId: accountKey, styleId: id, selectedAuthorSample: true } }
-    draft.styles = existing ? draft.styles.map(entry => (entry.id === id ? row : entry)) : [row, ...(draft.styles ?? [])]
-    draft.activeStyleId = id
-    return { id, failures, state: draft }
-  }, { undoable: false })
-}
-
-/** 导入用户自己的账号。钱花在 Monid 上，所以先把内容存好，提炼失败也不会白花。 */
-async function importAccountRoute(ctx, store, desk, body) {
-  if (desk.importing) throw Object.assign(new Error(tr('上一个账号还在导入，等它结束再试')), { status: 409 })
-  desk.importing = true
-  try {
-    const account = await resolveAccount(body.text)
-    const { posts, profile, cost } = await fetchAccount(account, desk.monid)
-    const sourceState = await store.read()
-    const covers = await store.run(() => saveCovers(posts, account.platform, sourceState, store.filesDir, fetch, desk.ownership.signal))
-    desk.ownership.signal.throwIfAborted()
-    const added = await store.mutate(tr('导入{platform}账号', { platform: platformName(account.platform) }), draft => importPosts(draft, { account, profile, posts, covers }).added)
-    const nickname = profile.nickname || platformName(account.platform)
-    let styleError = null
-    const material = postsToMaterial(posts)
-    if (material.length >= 80) {
-      try {
-        await styleFromMaterial(ctx, store, { material, name: nickname, source: tr('{platform}账号', { platform: platformName(account.platform) }), sourceUrls: [account.url], accountKey: `${account.platform}:${account.id}`, signal: desk.ownership.signal })
-      } catch (err) {
-        styleError = err.message
-      }
-    } else {
-      styleError = tr('这个账号的文字太少，提炼不出风格')
-    }
-    return { platform: account.platform, nickname, count: posts.length, added, cost, styleName: styleError ? null : nickname, styleError, state: await store.read() }
-  } finally {
-    desk.importing = false
-  }
+async function styleFromMaterial(ctx, store, { material, name, source, sourceUrls = [], failures = [], signal }) {
+  signal.throwIfAborted()
+  const sampleMaterial = { title: name || tr('作者样文'), body: material, source, url: sourceUrls[0], collectedAt: new Date().toISOString(),
+    materialType: 'author-sample', completeness: sourceUrls.length ? 'complete' : 'excerpt', selectedAuthorSample: true }
+  const prompts = stylePrompts(material, name)
+  const stage = await ctx.mediaDesk.nativeWork.request('style', null, prompts.system + '\n' + prompts.user, { data: { name, source, sourceUrls, sampleMaterial } })
+  return { stage, failures }
 }
 
 async function addFromUrl(ctx, store, body, signal) {
@@ -277,24 +164,6 @@ async function addFromUrl(ctx, store, body, signal) {
   return store.mutate(tr('收藏《{title}》', { title: op.title.slice(0, 12) }), (draft) => {
     const { receipts, errors } = applyOps(draft, [op])
     return { receipts, errors, id: receipts[0]?.target, state: draft }
-  })
-}
-
-async function refreshAccount(store, body, signal) {
-  const url = String(body.url || '').trim()
-  const now = new Date().toISOString()
-  let patch
-  try {
-    const info = await harvest(url, fetch, signal)
-    patch = { url: info.url, title: info.title ?? undefined, description: info.description ?? undefined, avatar: info.image ?? undefined, fetchedAt: now, fetchError: '', ...(info.followers ? { followers: info.followers } : {}) }
-  } catch (err) {
-    patch = { url, fetchedAt: now, fetchError: err.message }
-  }
-  signal.throwIfAborted()
-  return store.mutate(tr('更新账号档案'), (draft) => {
-    const op = body.id ? { op: 'update_account', id: body.id, ...patch } : { op: 'add_account', platform: body.platform ?? '', handle: body.handle ?? '', ...patch }
-    const { errors } = applyOps(draft, [op])
-    return { state: draft, errors, fetchError: patch.fetchError || null }
   })
 }
 
@@ -325,20 +194,24 @@ async function route(ctx, store, desk, req, res) {
     await store.read()
     return sendFile(req, res, join(store.filesDir, name), desk.ownership.signal)
   }
+  if ((method === 'GET' || method === 'HEAD') && path.startsWith('media/')) {
+    const id = path.slice('media/'.length)
+    if (!/^[a-f0-9-]{36}$/.test(id)) return json(res, 400, { error: tr('路径无效') })
+    return sendFile(req, res, await desk.mediaFiles.resolve(id), desk.ownership.signal)
+  }
   if (method === 'GET') {
     if (path === 'notes/migrations') return json(res, 200, { migrations: await store.migration.list() })
     if (path === 'notes/saves') return json(res, 200, { writes: await store.saves() })
+    if (path === 'media/saves') return json(res, 200, { saves: await desk.mediaFiles.saves() })
     if (path === 'sessions') return json(res, 200, { associations: await desk.nativeSessions.list() })
     if (path === 'state') {
-      if (!desk.settled) { desk.settled = true; await desk.producer.settleAll().catch(() => {}) }
       let state = await store.read()
       // 示例数据跟着界面语言走；用户自己的内容不动
       if (samplesNeedLocale(state, currentLang())) state = await store.localizeNotes(currentLang(), await desk.nativeSessions.list())
-      return json(res, 200, { state, model: engineLabel(ctx), modelOk: modelStatus.ok, modelError: modelStatus.error, canUndo: store.canUndo, undoId: store.undoId })
+      return json(res, 200, { state, model: engineLabel(ctx), modelOk: null, modelError: null, canUndo: store.canUndo, undoId: store.undoId })
     }
     if (path === 'production') {
       const id = url.searchParams.get('id') ?? ''
-      await desk.producer.settle(id)
       const state = await store.read()
       const item = state.items.find(row => row.id === id)
       return json(res, 200, { item: item ?? null, production: item?.production ?? null, status: item?.status, live: desk.producer.status(id) })
@@ -359,7 +232,6 @@ async function route(ctx, store, desk, req, res) {
       })
     }
     if (path === 'insights') return json(res, 200, computeInsights(await store.read()))
-    if (path === 'monid/status') return json(res, 200, await monidStatus(desk.monid))
     return json(res, 404, { error: tr('接口不存在') })
   }
   if (method !== 'POST') return json(res, 405, { error: tr('不支持的方法') })
@@ -373,6 +245,8 @@ async function route(ctx, store, desk, req, res) {
   switch (path) {
     case 'notes/migrate': {
       const result = await store.migrateNotes(await desk.nativeSessions.list(), (await desk.settings.read()).voice)
+      await desk.mediaFiles.migrate()
+      result.state = await store.read()
       await desk.settings.clearLegacyVoice()
       return json(res, 200, result)
     }
@@ -418,8 +292,7 @@ async function route(ctx, store, desk, req, res) {
     }
     case 'chat': return jsonState(res, store, await chatTurn(ctx, store, desk, body))
     case 'chat/clear': {
-      const state = await store.mutate('清空对话', (draft) => { draft.chat = []; return draft }, { undoable: false })
-      return json(res, 200, { state })
+      return json(res, 200, { association: await desk.nativeSessions.newConversation(body.workId ?? null), state: await store.read() })
     }
     case 'produce': {
       const started = await desk.producer.start(String(body.id))
@@ -431,17 +304,29 @@ async function route(ctx, store, desk, req, res) {
     case 'produce/regen':
       await desk.producer.regenerate(String(body.id), body.target)
       return json(res, 200, { state: await store.read() })
+    case 'native/retry':
+      return json(res, 200, { ...await desk.nativeWork.retry(body.id), state: await store.read() })
+    case 'media/retry':
+      return json(res, 200, { ...await desk.mediaFiles.retry(body.id), state: await store.read() })
     case 'produce/save': {
       const settings = await desk.settings.read()
       const state = await store.read()
       const item = state.items.find(row => row.id === body.id)
       if (!item?.production?.article) return json(res, 400, { error: tr('还没有可以保存的成稿') })
-      await store.read()
+      if (item.production.attemptId && !state.nativeRequests?.some(row => row.id === item.production.nativeStageId && row.status === 'accepted' && row.data.planId === item.production.attemptId)) {
+        return json(res, 409, { error: tr('当前策划的脚本尚未接受，请等待完成后保存') })
+      }
+      store.notes.assertExpected(state, body.expectedContent ?? {})
+      const production = structuredClone(item.production)
+      production.article = item.content ? item.body : production.article
+      production.title = item.title || production.title
       // 视频封面由浏览器合成（画面叠大字），这里只接受 JPEG
       const match = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(body.videoCover ?? '')
       const videoCover = match ? Buffer.from(match[1], 'base64') : null
       if (videoCover && !(videoCover[0] === 0xff && videoCover[1] === 0xd8)) return json(res, 400, { error: tr('封面不是有效的图片') })
-      const saved = await saveProduction(item.production, { filesDir: store.filesDir, exportDir: resolveExportDir(settings.exportDir), videoCover })
+      if (videoCover && (body.coverSrc !== production.cover?.src || body.coverText !== (production.coverText || production.title))) return json(res, 409, { error: tr('封面已变化，请重新保存') })
+      const saved = await saveProduction(production, { filesDir: store.filesDir, exportDir: resolveExportDir(settings.exportDir), videoCover,
+        resolveMedia: id => desk.mediaFiles.resolve(id), snapshot: { workId: item.id, content: item.content, attemptId: production.attemptId } })
       const next = await store.mutate('保存成稿', (draft) => {
         const target = draft.items.find(row => row.id === body.id)
         if (target?.production) {
@@ -462,14 +347,9 @@ async function route(ctx, store, desk, req, res) {
       return json(res, 200, { path })
     }
     case 'style/extract': return jsonState(res, store, await extractStyle(ctx, store, body, desk.ownership.signal))
-    case 'monid/import': return jsonState(res, store, await importAccountRoute(ctx, store, desk, body))
     case 'settings': {
-      const before = modelInfo(ctx)
       const updated = await desk.settings.update(body)
       setAssistantModel(updated.assistant)
-      const after = modelInfo(ctx)
-      // 换了模型，上一个模型的失败状态不再算数
-      if (before?.provider !== after?.provider || before?.model !== after?.model) Object.assign(modelStatus, { ok: null, error: null })
       return json(res, 200, { ...publicSettings(updated, Boolean(imageTool(ctx))), defaultExportDir: defaultExportDir(), assistantEffective: modelInfo(ctx)?.label ?? null })
     }
     case 'settings/test': {
@@ -483,18 +363,9 @@ async function route(ctx, store, desk, req, res) {
       return json(res, 200, { src: `media-desk/files/${name}` })
     }
     case 'capture-url': return jsonState(res, store, await addFromUrl(ctx, store, body, desk.ownership.signal))
-    case 'account/refresh': return jsonState(res, store, await refreshAccount(store, body, desk.ownership.signal))
     case 'skills/learn': {
-      const proposals = proposeRules(await store.read())
-      if (!proposals.length) return jsonState(res, store, { added: 0 })
-      const state = await store.mutate(tr('从数据中学习'), (draft) => {
-        // 只用示例数据算出来的建议也算示例，清空示例时一起清掉，也不会被导出
-        const fromSamples = !draft.metrics.some(metric => !metric.sample)
-        const { receipts } = applyOps(draft, proposals.map(row => ({ op: 'add_skill', ...row, status: 'proposed' })))
-        if (fromSamples) for (const receipt of receipts) { const skill = draft.skills.find(row => row.id === receipt?.target); if (skill) skill.sample = true }
-        return draft
-      })
-      return jsonState(res, store, { added: proposals.length, state })
+      const stage = await desk.nativeWork.request('rules', null, 'Read current Notes work and its fixed AI originals, and the recorded performance metrics. Propose evidence-based writing rules as rules[{name,rule,evidence}]. Treat correlations as observations rather than causation; proposals require user review.')
+      return jsonState(res, store, { stage })
     }
     case 'skills/export': {
       const state = await store.read()
@@ -547,7 +418,7 @@ export default class MediaDeskHost extends Service {
     const store = new Store(ownership.dataRoot, ownership)
     const settings = new Settings(store.root, ownership, store)
     const producer = new Producer({
-      store, settings, callText: options => callModel(ctx, { ...options, signal: AbortSignal.any([ownership.signal, ...(options.signal ? [options.signal] : [])]) }),
+      store, settings,
       ready: saved => imageReady(saved, Boolean(imageTool(ctx))),
       generate: (image, prompt, options = {}) => {
         const request = { ...options, signal: AbortSignal.any([ownership.signal, ...(options.signal ? [options.signal] : [])]) }
@@ -555,14 +426,20 @@ export default class MediaDeskHost extends Service {
       },
       onError: error => ctx.logger.error(error),
     })
-    const monid = createMonidRunner(undefined, undefined, ownership.signal)
     const nativeSessions = new NativeSessions(ctx, store, settings, config)
     store.notes = new Notes(ownership)
-    Object.assign(this, { store, settings, producer, monid, nativeSessions })
+    const nativeWork = new NativeWork(ctx, store, nativeSessions)
+    producer.native = nativeWork
+    const mediaFiles = new MediaFiles(store)
+    producer.media = mediaFiles
+    Object.assign(this, { store, settings, producer, nativeSessions, nativeWork, mediaFiles })
     const desk = this
     await nativeSessions.init()
     await store.notes.init()
     await store.read()
+    await mediaFiles.recover()
+    await producer.settleAll()
+    await nativeWork.init()
     // 启动时恢复用户在工作台里选过的助手模型
     setAssistantModel((await settings.read()).assistant)
     ctx.inject(['shellEnv'], shellCtx => shellCtx.shellEnv.register({
@@ -606,9 +483,16 @@ export default class MediaDeskHost extends Service {
   /** Stop Host-owned tasks and drain admitted writes before releasing directory ownership. */
   close() {
     if (this.closingPromise) return this.closingPromise
+    const nativeClose = this.store && this.ownership.track(async () => {
+      await this.nativeWork?.close()
+      await this.store.mutate('停止创作任务', draft => {
+        for (const stage of draft.nativeRequests ?? []) if (['pending', 'running', 'waiting', 'candidate', 'save-failed'].includes(stage.status)) stage.status = 'interrupted'
+        for (const work of draft.items) if (work.production?.status === 'running') work.production.status = 'cancelled'
+      }, { undoable: false })
+    })
     this.ownership.beginShutdown()
     this.closingPromise = (async () => {
-      await this.producer?.close()
+      await Promise.all([nativeClose, this.producer?.close()])
       await this.ownership.drain()
       await this.ownership.release()
     })()

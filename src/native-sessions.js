@@ -39,6 +39,7 @@ export class NativeSessions {
     this.file = join(store.root, 'sessions.json')
     this.associations = []
     this.operations = new Map()
+    this.resets = new Map()
   }
 
   /**
@@ -105,6 +106,10 @@ export class NativeSessions {
    * @returns {Promise<object>} Durable actual Session, workspace, home, preset and native model association.
    */
   open(workId = null) {
+    return this.resets.get(workId) ?? this.openBound(workId)
+  }
+
+  openBound(workId = null) {
     if (workId !== null && (typeof workId !== 'string' || !workId || workId.length > 200)) {
       return Promise.reject(failure('association/invalid-work', tr('作品标识无效'), 400))
     }
@@ -116,7 +121,7 @@ export class NativeSessions {
       if (workId !== null && !work) {
         throw failure('association/work-not-found', tr('作品不存在：{id}', { id: workId }), 404)
       }
-      const saved = this.associations.find(row => row.workId === workId)
+      const saved = this.associations.find(row => row.workId === workId && row.active !== false)
       if (saved) return this.restore(saved)
       if (work?.content && (work.content.status !== 'ready' || !this.store.notes.roots.has(work.content.notesRoot))) {
         throw failure(work.content.code ?? 'notes/unowned-root', work.content.error ?? tr('作品所在的 Notes 目录尚未取得写入所有权'))
@@ -190,7 +195,7 @@ export class NativeSessions {
    * @throws {Error} For unbound Sessions, foreign homes, roots, workspaces or presets.
    */
   requireAssociation(agent) {
-    const row = this.associations.find(entry => entry.status === 'bound' && entry.sessionId === agent?.session?.id)
+    const row = this.associations.find(entry => entry.status === 'bound' && entry.active !== false && entry.sessionId === agent?.session?.id)
     if (!row || row.dshHome !== this.home) throw failure('association/unbound', tr('此原生会话尚未绑定 Media Desk 对象，请从工作台打开会话'))
     const workspace = this.service('workspaceRegistry').get(row.workspaceId)
     if (!workspace?.sessionIds.includes(row.sessionId) || workspace.path !== row.wikiRoot
@@ -202,5 +207,25 @@ export class NativeSessions {
       throw failure('association/preset-changed', tr('会话组合与作品关联不一致，请恢复原创作组合后重试'))
     }
     return row
+  }
+
+  /** Preserve the old Session and its inbox; future work receives a fresh durable association. */
+  newConversation(workId = null) {
+    const existing = this.resets.get(workId)
+    if (existing) return existing
+    const operation = (async () => {
+      await this.operations.get(workId)
+      await this.ctx.mediaDesk.producer.cancel(workId)
+      await this.ctx.mediaDesk.nativeWork.cancel(workId, { all: true })
+      await this.store.run(async () => {
+        await this.reload()
+        await this.save(this.associations.map(row => row.workId === workId && row.active !== false ? { ...row, active: false } : row))
+      })
+      return this.openBound(workId)
+    })()
+    this.resets.set(workId, operation)
+    const complete = () => this.resets.delete(workId)
+    operation.then(complete, complete)
+    return operation
   }
 }

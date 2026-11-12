@@ -3,9 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { callModel, planPrompts } from '../src/ai.js'
 import { currentLang, ENGLISH_DIRECTIVE, tr, withLang } from '../src/i18n.js'
-import { localIntent, parseWhen } from '../src/intents.js'
 import { applyOps } from '../src/ops.js'
 import { applyRevision, normalizePlan } from '../src/produce.js'
 import { buildSeed, localizeSamples, migrateState, samplesNeedLocale } from '../src/seed.js'
@@ -135,65 +133,6 @@ test('localizeSamples：清空示例后只换内置预设；旧数据没有 samp
   assert.equal(legacy.sampleLang, 'zh')
   localizeSamples(legacy, 'en')
   assert.ok(legacy.styles.length > 0 && legacy.styles.every(row => !CJK.test(row.name)))
-})
-
-test('英文界面下，系统提示词末尾追加英文要求，原来的中文提示词保留', async () => {
-  const seen = []
-  const ctx = {
-    get(name) {
-      if (name === 'agentDefaultModel') return { currentSelection: () => ({ provider: 'p', model: 'm' }) }
-      if (name === 'llm') {
-        return {
-          prepareCall: async () => ({
-            config: {},
-            async* stream(request) {
-              seen.push(request.system)
-              yield { type: 'text-delta', text: 'ok' }
-            },
-          }),
-        }
-      }
-      return undefined
-    },
-  }
-  await callModel(ctx, { system: '你是文风分析师。', user: 'x' })
-  await withLang('en', () => callModel(ctx, { system: '你是文风分析师。', user: 'x' }))
-  assert.equal(seen[0], '你是文风分析师。')
-  assert.ok(seen[1].startsWith('你是文风分析师。'))
-  assert.ok(seen[1].endsWith(ENGLISH_DIRECTIVE))
-
-  // 模拟模型靠中文关键词识别提示词，英文界面下这些词还在
-  const state = buildSeed(NOW, 'zh')
-  const settings = { imageCount: 2, shotCount: 6, voice: '' }
-  const en = withLang('en', () => planPrompts(state, state.items[0], settings).system)
-  assert.match(en, /策划案/)
-  assert.doesNotMatch(en, /中文图注/)
-  assert.match(planPrompts(state, state.items[0], settings).system, /中文图注/)
-})
-
-test('英文本地规则：常见说法和中文一样能用，回复是英文', () => {
-  withLang('en', () => {
-    const state = buildSeed(NOW)
-    assert.deepEqual(localIntent(state, 'write it as a script', { now: NOW, focusId: 'seed_2' }).actions, [{ type: 'produce', id: 'seed_2' }])
-    const noted = localIntent(state, 'note: billboard copy on the subway', { now: NOW })
-    assert.equal(noted.ops[0].op, 'add_item')
-    assert.equal(noted.reply, 'Saved. It\'s on the idea wall.')
-    const scheduled = localIntent(state, 'schedule "Slow writing" for tomorrow 8pm on xiaohongshu', { now: NOW })
-    assert.equal(scheduled.ops[0].id, 'seed_7')
-    assert.equal(scheduled.ops[0].platform, '小红书')
-    const when = new Date(scheduled.ops[0].scheduledAt)
-    assert.deepEqual([when.getMonth() + 1, when.getDate(), when.getHours()], [11, 1, 20])
-    assert.deepEqual(localIntent(state, 'move it to ready', { now: NOW, focusId: 'seed_2' }).ops, [{ op: 'set_status', id: 'seed_2', status: 'ready' }])
-    assert.equal(localIntent(state, 'rename it to "A better title"', { now: NOW, focusId: 'seed_2' }).ops[0].id, 'seed_2')
-    assert.match(localIntent(state, "what's on my schedule", { now: NOW }).reply, /^Coming up:/)
-    const [receipt] = applyOps(state, [{ op: 'schedule_item', id: 'seed_2', scheduledAt: '2026-11-03T12:00:00Z', platform: '小红书' }]).receipts
-    assert.match(receipt.text, /^Scheduled ".+" for Nov 3 \d\d:00 · RedNote$/)
-  })
-  const at = text => { const d = parseWhen(text, NOW); return d && [d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes()] }
-  assert.deepEqual(at('Nov 3 20:00'), [11, 3, 20, 0])
-  assert.deepEqual(at('next wed'), [11, 4, 20, 0])
-  assert.deepEqual(at('tonight at 9'), [10, 31, 21, 0])
-  assert.equal(parseWhen('no date here', NOW), null)
 })
 
 test('英文成稿：回执、默认景别和封面大字兜底都是英文，长度上限不变', () => {

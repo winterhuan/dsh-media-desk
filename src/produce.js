@@ -1,16 +1,12 @@
 // 一键成稿流水线：文章 → 标题与画面规划 → 封面、配图、分镜。
 // 任务在 Host 里跑，关掉页面也不会中断；每生成一张图就落盘一次。
-import { writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { articlePrompts, extractJson, fallbackArticle, fallbackPlan, planPrompts, shortCoverText } from './ai.js'
+import { shortCoverText } from './ai.js'
 import { tr } from './i18n.js'
 import { coverPrompt, figurePrompt, shotPrompt } from './images.js'
 import { newId } from './ops.js'
 import { imageReady } from './settings.js'
 
 const CONCURRENCY = 3
-// 模型卡住不出字时，到点改用草稿，不让进度条一直转
-const TEXT_TIMEOUT_MS = 240_000
 const RETRY_WAIT_MS = [6000, 14000]
 
 function splitTitle(markdown, fallback) {
@@ -136,26 +132,31 @@ export function applyRevision(production, revise, { canDraw = true } = {}) {
 
 export class Producer {
   /**
-   * @param {{store: object, settings: object, callText: Function, generate: Function, ready?: Function}} deps - 存储、设置、文本模型和生图函数。
+   * @param {{store: object, settings: object, native: object, generate: Function, ready?: Function}} deps - 存储、设置、原生文字任务和生图函数。
    */
-  constructor({ store, settings, callText, generate, ready = imageReady, onError }) {
+  constructor({ store, settings, native, generate, ready = imageReady, onError }) {
     this.store = store
     this.settings = settings
-    this.callText = callText
+    this.native = native
     this.generate = generate
     this.ready = ready
     this.jobs = new Map()
     this.assets = new Set()
     this.pending = new Set()
+    this.pendingByWork = new Map()
     this.assetControllers = new Map()
     this.closing = false
     this.onError = onError
   }
 
-  launch(task) {
+  launch(task, workId) {
     const operation = this.store.owner ? this.store.owner.track(task) : Promise.resolve().then(task)
     this.pending.add(operation)
-    operation.then(() => this.pending.delete(operation), error => { this.pending.delete(operation); this.onError?.(error) })
+    const owned = this.pendingByWork.get(workId) ?? new Set()
+    this.pendingByWork.set(workId, owned)
+    owned.add(operation)
+    const settled = () => { this.pending.delete(operation); owned.delete(operation); if (!owned.size) this.pendingByWork.delete(workId) }
+    operation.then(settled, error => { settled(); this.onError?.(error) })
     return operation
   }
 
@@ -195,149 +196,117 @@ export class Producer {
 
   async start(id) {
     if (this.closing) throw Object.assign(new Error(tr('Media Desk 正在关闭，请稍后重试')), { status: 503 })
-    if (this.jobs.has(id)) return false
-    const state = await this.store.read()
-    const item = state.items.find(row => row.id === id)
-    if (this.closing) throw Object.assign(new Error(tr('Media Desk 正在关闭，请稍后重试')), { status: 503 })
-    if (!item) throw Object.assign(new Error(tr('找不到这条灵感')), { status: 404 })
-    if (item.content && item.content.status !== 'ready') throw Object.assign(new Error(item.content.error), { code: item.content.code, status: 409 })
-    if (this.jobs.has(id)) return false
-    const job = { stage: 'brief', text: '', planText: '', controller: new AbortController() }
-    const selectedStyle = state.styles?.find(row => row.id === state.activeStyleId)
-    const style = selectedStyle?.preset ? { kind: 'preset', id: selectedStyle.id, presetVersion: state.presetVersion } : selectedStyle?.content
-    const rules = state.skills?.filter(row => !row.sample && ['active', 'exported'].includes(row.status) && row.content).map(row => row.content.snapshot ?? row.content) ?? []
-    const preferenceVersions = {
-      ...(state.voice?.content ? { voice: state.voice.content.snapshot ?? state.voice.content } : {}),
-      ...(style ? { style: style.snapshot ?? style } : {}),
-      rules,
-    }
-    this.jobs.set(id, job)
-    try {
-      await this.store.mutate('开始成稿', (draft) => {
-        const target = draft.items.find(row => row.id === id)
-        if (!target) throw Object.assign(new Error(tr('找不到这条灵感')), { status: 404 })
-        target.production = { status: 'running', stage: 'brief', startedAt: new Date().toISOString(), title: target.title, current: Boolean(target.content), article: target.content ? target.body : '', cover: null, images: [], shots: [], preferenceVersions }
-        return draft
-      }, { undoable: false, expectedContent: item.content ? { [id]: item.content } : {} })
-    } catch (error) {
-      this.jobs.delete(id)
-      throw error
-    }
-    // 不等待：浏览器靠轮询拿进度
-    const completion = this.launch(() => this.run(id, job))
-    completion.then(() => this.jobs.delete(id), () => this.jobs.delete(id))
-    return true
+    const stage = await this.native.request('plan', id, 'Research the bound Wiki with llm-wiki, verify sources and prepare a production plan. Use the selected material, style, active writing rules and personal voice. Return the bounded plan described by media_desk_submit_result, with dates and evidence limits.', { producer: true })
+    return !stage.reused
+  }
+
+  async invalidate(id) {
+    for (const [key, controller] of this.assetControllers) if (key.startsWith(id + ':')) controller.abort()
+    this.jobs.get(id)?.controller.abort()
+    await this.store.mutate('取消成稿', draft => {
+      for (const stage of draft.nativeRequests ?? []) if (stage.workId === id && ['pending', 'running', 'waiting', 'candidate', 'save-failed'].includes(stage.status)) stage.status = 'cancelled'
+      const work = draft.items.find(row => row.id === id)
+      if (work?.production) {
+        work.production.status = 'cancelled'
+        for (const asset of [work.production.cover, ...work.production.images ?? [], ...work.production.shots ?? []]) if (asset && ['pending', 'running'].includes(asset.status)) asset.status = 'cancelled'
+      }
+    }, { undoable: false })
   }
 
   async cancel(id) {
-    this.jobs.get(id)?.controller.abort()
+    await this.invalidate(id)
+    await this.native.cancel(id)
+    while (this.pendingByWork.get(id)?.size) await Promise.allSettled([...this.pendingByWork.get(id)])
   }
 
-  async run(id, job) {
-    const { signal } = job.controller
+  validatePlan(raw, settings) {
+    const bad = message => { throw Object.assign(new Error(message), { code: 'native/plan-invalid', status: 400 }) }
+    for (const key of ['title', 'coverText', 'cover']) if (typeof raw[key] !== 'string' || !raw[key].trim()) bad('Plan requires ' + key)
+    for (const key of ['facts', 'outline', 'images', 'shots']) if (!Array.isArray(raw[key])) bad('Plan requires ' + key)
+    if (raw.facts.length > 8 || raw.outline.length > 6 || raw.images.length !== settings.imageCount || raw.shots.length !== settings.shotCount) bad('Plan counts must match the requested settings')
+    if (raw.images.some(row => typeof row.prompt !== 'string' || !row.prompt.trim()) || raw.shots.some(row => typeof row.prompt !== 'string' || !row.prompt.trim() || typeof row.voice !== 'string' || !Number.isFinite(row.seconds))) bad('Image and storyboard descriptions are incomplete')
+  }
+
+  acceptPlan(draft, stage) {
+    const item = draft.items.find(row => row.id === stage.workId)
+    if (!item) throw Object.assign(new Error('Work no longer exists'), { status: 409 })
+    const plan = normalizePlan(stage.candidate, stage.data.settings, item.title)
+    item.title = plan.title
+    const initial = stage.data.settings.imageReady ? 'pending' : 'skipped'
+    item.production = { ...(item.production ?? {}), status: 'running', stage: 'making', startedAt: stage.createdAt,
+      attemptId: stage.id, planStageId: stage.id, title: plan.title, coverText: plan.coverText, facts: plan.facts, outline: plan.outline,
+      characters: plan.characters, sources: stage.candidate.sources ?? [], current: false,
+      cover: { prompt: plan.cover, status: initial }, images: plan.images.map(row => ({ ...row, status: initial })),
+      shots: plan.shots.map(row => ({ ...row, status: initial })), preferenceVersions: stage.data.preferenceVersions,
+      requestedModel: stage.requestedModel, actualModels: stage.actualModels }
+  }
+
+  async nativeAccepted(stage) {
+    if (stage.kind === 'article') {
+      await this.complete(stage.workId)
+      return
+    }
+    if (stage.kind !== 'plan' || this.closing) return
+    const state = await this.store.read()
+    const item = state.items.find(row => row.id === stage.workId)
+    if (!item?.production || item.production.attemptId !== stage.id || item.production.status !== 'running') return
+    const settings = await this.native.productionSettings(stage.id)
+    const job = { stage: 'making', text: '', planText: '', controller: new AbortController(), attemptId: stage.id }
+    this.jobs.set(stage.workId, job)
+    const tasks = []
     try {
-      const settings = await this.settings.read()
-      const state = await this.store.read()
-      const item = state.items.find(row => row.id === id)
-      const snapshot = JSON.parse(JSON.stringify(state))
-      const expectedContent = item.content ? { [id]: item.content } : {}
-
-      signal.throwIfAborted()
-      const backup = normalizePlan(fallbackPlan(item, '', settings), settings, item.title)
-
-      let plan
-      try {
-        const prompts = planPrompts(snapshot, item, settings)
-        const { text } = await this.callText({ ...prompts, maxTokens: 3000, light: true, signal: AbortSignal.any([signal, AbortSignal.timeout(TEXT_TIMEOUT_MS)]), onText: (delta) => { job.planText += delta } })
-        plan = normalizePlan(extractJson(text), settings, item.title)
-      } catch (err) {
-        if (signal.aborted) throw err
-        plan = backup
-      }
-      // 模型漏掉配图或分镜时用模板补上，流水线不能因此少一块
-      if (plan.images.length < settings.imageCount) plan.images = [...plan.images, ...backup.images.slice(plan.images.length)]
-      if (plan.shots.length < settings.shotCount) plan.shots = [...plan.shots, ...backup.shots.slice(plan.shots.length).map((row, i) => ({ ...row, no: plan.shots.length + i + 1 }))]
-
-      const ready = this.ready(settings)
-      const initial = ready ? 'pending' : 'skipped'
-      job.stage = 'making'
-      signal.throwIfAborted()
-      await this.patch(id, (production) => {
-        production.stage = 'making'
-        production.title = plan.title
-        production.coverText = plan.coverText
-        production.facts = plan.facts
-        production.outline = plan.outline
-        production.characters = plan.characters
-        production.cover = { prompt: plan.cover, status: initial }
-        production.images = plan.images.map(row => ({ ...row, status: initial }))
-        production.shots = plan.shots.map(row => ({ ...row, status: initial }))
-        if (!ready) production.needsProvider = true
-      })
-
-      // 策划案定了之后，文章和所有画面同时开工
-      const writeArticle = async () => {
-        let engine = 'local'
-        let notice = null
-        let markdown = ''
-        try {
-          const prompts = articlePrompts(snapshot, item, settings.voice, plan)
-          const result = await this.callText({ ...prompts, maxTokens: 6000, signal: AbortSignal.any([signal, AbortSignal.timeout(TEXT_TIMEOUT_MS)]), onText: (delta) => { job.text += delta } })
-          markdown = result.text
-          engine = result.model
-          if (!markdown.trim()) throw new Error(tr('模型返回了空内容'))
-        } catch (err) {
-          if (signal.aborted) throw err
-          markdown = fallbackArticle(snapshot, item)
-          job.text = markdown
-          notice = tr('没有连上文字模型，先给你一份结构草稿。可以到 DeepSeek Harness 设置里检查模型。')
-        }
-        const { article } = splitTitle(markdown, plan.title)
-        signal.throwIfAborted()
-        await this.patch(id, (production) => {
-          production.article = article
-          production.aiArticle = article
-          production.engine = engine
-          production.notice = notice
-        }, expectedContent)
-      }
-
-      const tasks = [writeArticle()]
-      if (ready) {
-        const targets = ['cover', ...plan.images.map((_, i) => `image:${i}`), ...plan.shots.map((_, i) => `shot:${i}`)]
+      const article = await this.native.request('article', stage.workId,
+        'Write the complete Markdown script based on the accepted plan, facts and sources. Use llm-wiki to check relevant evidence. Submit article and dated sources through media_desk_submit_result.',
+        { data: { planId: stage.id, preferenceVersions: stage.data.preferenceVersions, materialVersion: stage.data.materialVersion, language: stage.data.language } })
+      job.articleStageId = article.id
+      if (this.ready(settings)) {
+        const targets = ['cover', ...item.production.images.map((_, i) => 'image:' + i), ...item.production.shots.map((_, i) => 'shot:' + i)]
         let next = 0
         const worker = async () => {
-          while (next < targets.length && !signal.aborted) {
-            const target = targets[next]
-            next += 1
-            await this.renderAsset(id, target, settings, signal)
+          while (next < targets.length && !job.controller.signal.aborted) {
+            await this.renderAsset(stage.workId, targets[next++], settings, job.controller.signal, stage.id)
           }
         }
-        for (let i = 0; i < CONCURRENCY; i += 1) tasks.push(worker())
+        for (let i = 0; i < CONCURRENCY; i++) tasks.push(this.launch(worker, stage.workId))
       }
-      await Promise.all(tasks)
-      if (signal.aborted) throw new Error('cancelled')
-
-      await this.store.mutate('完成成稿', (draft) => {
-        const target = draft.items.find(row => row.id === id)
-        if (!target?.production) return draft
-        target.production.status = 'done'
-        target.production.stage = 'done'
-        target.production.finishedAt = new Date().toISOString()
-        if (['idea', 'outline'].includes(target.status)) target.status = target.scheduledAt ? 'ready' : 'draft'
-        return draft
-      }, { undoable: false })
-    } catch (err) {
-      const cancelled = signal.aborted
-      await this.patch(id, (production) => {
-        production.status = cancelled ? 'cancelled' : 'failed'
-        production.stage = 'done'
-        production.error = cancelled ? null : err.message
-        for (const asset of [production.cover, ...production.images ?? [], ...production.shots ?? []]) {
-          if (asset && ['pending', 'running'].includes(asset.status)) asset.status = 'idle'
-        }
-      })
+      const completion = this.launch(async () => {
+        await Promise.allSettled(tasks)
+        await this.complete(stage.workId)
+      }, stage.workId)
+      completion.catch(error => this.onError?.(error))
+    } catch (error) {
+      await this.patch(stage.workId, production => { production.status = 'failed'; production.error = error.message })
     }
+  }
+
+  async nativeEnded(stage) {
+    if (!['plan', 'article'].includes(stage.kind)) return
+    const state = await this.store.read()
+    const row = state.nativeRequests?.find(row => row.id === stage.id)
+    if (row?.status === 'accepted') return
+    await this.patch(stage.workId, production => {
+      if (stage.kind === 'article' && stage.data.planId !== production.attemptId || stage.kind === 'plan' && stage.id !== production.attemptId) return
+      production.status = production.article ? 'partial' : row?.status ?? 'failed'
+      production.error = row?.error
+    })
+    await this.complete(stage.workId)
+  }
+
+  async complete(id) {
+    const state = await this.store.read()
+    const item = state.items.find(row => row.id === id)
+    const production = item?.production
+    if (!production) return
+    const article = state.nativeRequests?.find(row => row.id === production.nativeStageId && row.kind === 'article' && row.data.planId === production.attemptId)
+    const pendingArticle = state.nativeRequests?.some(row => row.workId === id && row.kind === 'article' && ['pending', 'running', 'waiting', 'candidate', 'save-failed'].includes(row.status))
+    const assets = [production.cover, ...production.images ?? [], ...production.shots ?? []].filter(Boolean)
+    if (pendingArticle || assets.some(row => ['pending', 'running'].includes(row.status))) return
+    await this.patch(id, next => {
+      if (['cancelled', 'interrupted'].includes(next.status)) return
+      next.status = article?.status === 'accepted' && !assets.some(row => ['failed', 'cancelled'].includes(row.status)) ? 'done' : next.article ? 'partial' : 'failed'
+      next.stage = 'done'; next.finishedAt = new Date().toISOString()
+    })
+    this.jobs.delete(id)
   }
 
   /** 生图服务限流（429）时等一会儿再试，最多再试两次；其他错误直接报。 */
@@ -356,39 +325,34 @@ export class Producer {
     }
   }
 
-  async renderAsset(id, target, settings, signal) {
+  async renderAsset(id, target, settings, signal, attemptId) {
     let prompt = null
+    let renderId
     await this.patch(id, (production) => {
       const asset = assetAt(production, target)
-      if (!asset) return
+      if (!asset || attemptId && production.attemptId !== attemptId || ['cancelled'].includes(production.status)) return
+      renderId = newId('render')
+      asset.renderId = renderId
       asset.status = 'running'
       asset.error = null
       prompt = fullPrompt(production, target, asset)
     })
     if (!prompt) return
     try {
-      const { buffer, ext } = await this.generateWithRetry(settings.image, prompt, signal)
-      const name = `${newId('g')}${ext}`
-      const publish = async () => {
-        signal?.throwIfAborted()
-        await writeFile(join(this.store.filesDir, name), buffer)
-        signal?.throwIfAborted()
-        await this.patch(id, (production) => {
-          const asset = assetAt(production, target)
-          if (!asset) return
-          asset.status = 'done'
-          asset.src = `media-desk/files/${name}`
-        })
+      const result = await this.generateWithRetry(settings.image, prompt, signal)
+      signal?.throwIfAborted()
+      if (this.media) {
+        await this.media.save(id, target, result, { attemptId, renderId })
+      } else {
+        throw new Error('Accepted media requires the Notes media service')
       }
-      if (this.store.owner) await this.store.owner.run(publish)
-      else await publish()
     } catch (err) {
-      if (signal?.aborted) return
       await this.patch(id, (production) => {
         const asset = assetAt(production, target)
-        if (!asset) return
-        asset.status = 'failed'
+        if (!asset || asset.renderId !== renderId || attemptId && production.attemptId !== attemptId) return
+        asset.status = signal?.aborted ? 'cancelled' : 'failed'
         asset.error = err.message
+        if (err.mediaPendingId) asset.pendingId = err.mediaPendingId
       })
     }
   }
@@ -409,12 +373,11 @@ export class Producer {
     const controller = new AbortController()
     this.assetControllers.set(key, controller)
     await this.patch(id, (next) => { assetAt(next, target).status = 'running' })
-    const completion = this.launch(() => this.renderAsset(id, target, settings, controller.signal))
-    const done = () => { this.assets.delete(key); this.assetControllers.delete(key) }
+    const completion = this.launch(() => this.renderAsset(id, target, settings, controller.signal, production.attemptId), id)
+    const done = () => { this.assets.delete(key); this.assetControllers.delete(key); this.launch(() => this.complete(id), id) }
     completion.then(done, done)
   }
 
-  /** Host 重启后，没人在跑的「进行中」不能一直转圈。 */
   /** Host 重启后，把上次没做完的成稿都标成中断，卡片不会一直显示「正在成稿」。 */
   async settleAll() {
     const state = await this.store.read()
@@ -429,7 +392,7 @@ export class Producer {
     if (production.status !== 'running' && !stuck) return
     await this.patch(id, (next) => {
       if (next.status === 'running') {
-        next.status = 'failed'
+        next.status = 'interrupted'
         next.stage = 'done'
         next.error = tr('上次成稿被中断了，可以重新开始')
       }

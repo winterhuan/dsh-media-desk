@@ -15,14 +15,14 @@
   en: d82a25774fdda2a7
   zh: 74a5455dea14a89f
 /winterhuan-dsh-media-desk/use-this-package:
-  en: 9a36fbcaf9c83a99
-  zh: 5b2a3d30e3faf094
+  en: 8c285a706978a04b
+  zh: 62427bfcecd22546
 /winterhuan-dsh-media-desk/use-this-package/native-conversations:
-  en: 0d0bbf52172dca24
-  zh: a19e7a8a40f5d2cb
+  en: 964d4490220b7eec
+  zh: ddfe50aff475bac4
 /winterhuan-dsh-media-desk/use-this-package/notes-work-files:
-  en: 1757068966bf3eb7
-  zh: f61a695be99b6ddc
+  en: 4ae0ff3f838999a8
+  zh: ec635eb44d502f11
 /winterhuan-dsh-media-desk/development:
   en: 0664eeffc595f023
   zh: f6d3aae4e2a7b780
@@ -30,8 +30,8 @@
   en: aad36f44f54f79ad
   zh: cf330d48c5d45158
 /winterhuan-dsh-media-desk/further-exploration:
-  en: 2bd3be0480372495
-  zh: 8187054a2bb73df4
+  en: c880ace12ceb702b
+  zh: ae21b1e2fc76356f
 /winterhuan-dsh-media-desk/model-experience:
   en: 215e7ba838619b7b
   zh: a311da3843709f90
@@ -47,21 +47,21 @@
 /winterhuan-dsh-media-desk/model-experience/native-creative-context/kv-cache-effect:
   en: 7a261ff7069f9ff8
   zh: a0341137ffa74728
-/winterhuan-dsh-media-desk/model-experience/workbench-context:
-  en: e78c0259ebd4c505
-  zh: ee839162694e500d
-/winterhuan-dsh-media-desk/model-experience/workbench-context/what-the-model-sees:
-  en: 0d68d7899c652f36
-  zh: 735365183ecadcab
-/winterhuan-dsh-media-desk/model-experience/workbench-context/token-effect:
-  en: 46fecd19ae8be372
-  zh: cbf228ee665c2bc7
-/winterhuan-dsh-media-desk/model-experience/workbench-context/kv-cache-effect:
+/winterhuan-dsh-media-desk/model-experience/creative-business-tools:
+  en: 9ee820434d970db4
+  zh: 0502481021998c8b
+/winterhuan-dsh-media-desk/model-experience/creative-business-tools/what-the-model-sees:
+  en: f5590fb79beb878f
+  zh: 085b24c04623c667
+/winterhuan-dsh-media-desk/model-experience/creative-business-tools/token-effect:
+  en: d7436a40d6b2a3d4
+  zh: 4cc7cf54389c4698
+/winterhuan-dsh-media-desk/model-experience/creative-business-tools/kv-cache-effect:
   en: 9095df0a98b9f267
   zh: 9e7f343181e1ed48
 /winterhuan-dsh-media-desk/known-limitations-and-deferred-work:
-  en: 8c257ed4c221aa69
-  zh: 79b92b76f6b71493
+  en: da0d1a88fa112a15
+  zh: 7072cce5367edfe3
 /winterhuan-dsh-media-desk/known-limitations-and-deferred-work/dev-note:
   en: 0a1253c6f7b5e8b9
   zh: 9f56528562c7c914

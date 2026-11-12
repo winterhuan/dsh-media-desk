@@ -1,6 +1,6 @@
 /** Saved candidates, conflict review and legacy migration share the existing workbench dialog. */
 import React from 'react'
-import { getDesk, migrateLegacyNotes, notesMigrationBackups, readSavedNotesVersion, resolveNotesVersion, retryNotesSave, savedNotesWrites, setDesk, useDesk } from './desk.js'
+import { getDesk, migrateLegacyNotes, notesMigrationBackups, readSavedNotesVersion, resolveNotesVersion, retryNotesSave, retryCreativeSave, savedNotesWrites, savedMediaWrites, setDesk, useDesk } from './desk.js'
 import { t } from './i18n.js'
 import { Dialog, Icon } from './ui.jsx'
 
@@ -16,6 +16,12 @@ export function NotesRecoveryDialog() {
       || state.skills.some(row => !row.sample && !row.content)
       || settings?.voice && !state.voice?.content
   )))
+  const state = useDesk(state => state.state)
+  const [mediaSaves, setMediaSaves] = React.useState([])
+  const tasks = [
+    ...(state.nativeRequests ?? []).filter(row => row.status === 'save-failed').map(row => ({ kind: 'native', id: row.id, error: row.error })),
+    ...mediaSaves.map(row => ({ kind: 'media', id: row.id, error: `${row.workId} · ${row.target}` })),
+  ]
   const [writes, setWrites] = React.useState([])
   const [backups, setBackups] = React.useState([])
   const [loading, setLoading] = React.useState(false)
@@ -29,10 +35,11 @@ export function NotesRecoveryDialog() {
     setLoading(true)
     setError(null)
     try {
-      const [saves, migrations] = await Promise.all([savedNotesWrites(), notesMigrationBackups()])
+      const [saves, migrations, media] = await Promise.all([savedNotesWrites(), notesMigrationBackups(), savedMediaWrites()])
       if (token !== sequence.current) return
       setWrites(saves.filter(save => !['accepted', 'rejected'].includes(save.status) || save.conflicts.length))
       setBackups(migrations)
+      setMediaSaves(media)
     } catch (cause) { if (token === sequence.current) setError(cause.message) }
     finally { if (token === sequence.current) setLoading(false) }
   }, [])
@@ -96,6 +103,7 @@ export function NotesRecoveryDialog() {
               </div>) : save.requiresValidation ? <p className="md-muted">{t('此候选需要重新核验所属任务，请从任务入口继续')}</p>
                 : <button type="button" className="md-btn is-small" disabled={pending} onClick={() => run(() => retryNotesSave(save.id))}>{t('重试保存')}</button>}
             </section>) : !error ? <p>{t('没有待恢复的保存')}</p> : null}
+          {tasks.map(task => <section key={task.id} className="md-retained-save"><p>{task.error}</p><button type="button" className="md-btn is-small" disabled={pending} onClick={() => run(() => retryCreativeSave(task.kind, task.id))}>{t('重试保存')}</button></section>)}
           {legacy ? <section className="md-retained-save">
             <p>{t('旧作品和写作资料迁移前会创建并验证备份，语言稿、AI 原稿与来源信息保留')}</p>
             <button type="button" className="md-btn" disabled={pending || loading} onClick={() => run(migrateLegacyNotes)}>{t('迁移旧内容到 Notes')}</button>

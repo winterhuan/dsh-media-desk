@@ -1,7 +1,6 @@
 // GitHub issue 回归：#3 生图网关返回相对路径，#4 会话外调用缺少会话标识。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { callModel, PLUGIN_SESSION_ID } from '../src/ai.js'
 import { generateImage, imageUrlCandidates } from '../src/images.js'
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex')
@@ -65,32 +64,6 @@ test('#3 别的域名的下载地址照样拦内网', async () => {
     ? new Response(JSON.stringify({ data: [{ url: 'http://127.0.0.1/x.png' }] }))
     : new Response(PNG))
   await assert.rejects(generateImage(GATEWAY, 'p', { fetchImpl: internal }), /本机|内网/)
-})
-
-test('#4 模型调用带上会话标识，供 opencode-go 这类按会话路由的网关使用', async () => {
-  const requests = []
-  const ctx = {
-    get(name) {
-      if (name === 'agentDefaultModel') return { currentSelection: () => ({ provider: 'opencode-go', model: 'deepseek-v4.1-flash' }) }
-      if (name === 'llm') {
-        return {
-          prepareCall: async () => ({
-            config: {},
-            async* stream(request) {
-              requests.push(request)
-              yield { type: 'text-delta', text: 'ok' }
-            },
-          }),
-        }
-      }
-      return undefined
-    },
-  }
-  await callModel(ctx, { system: 's', user: 'u' })
-  await callModel(ctx, { system: 's', user: 'u' })
-  await callModel(ctx, { system: 's', user: 'u', sessionId: 'custom' })
-  assert.match(PLUGIN_SESSION_ID, /^dsh-media-desk-[\da-f-]{36}$/)
-  assert.deepEqual(requests.map(row => row.sessionId), [PLUGIN_SESSION_ID, PLUGIN_SESSION_ID, 'custom'])
 })
 
 test('PR #5 助手模型自选：指定后优先用，清空后跟随默认；提供方和模型要一起填', async () => {

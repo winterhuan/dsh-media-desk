@@ -8,7 +8,7 @@ import { inspectRuntime } from './fixtures/inspector.js'
 
 test('对话回执撤销所属编辑，冷恢复后保留后来编辑且普通回答没有撤销身份', { timeout: 180000 }, async t => {
   const runtime = await nativeRuntime(t, { recipes: {
-    MD_FIXTURE_CHAT_TITLE: { calls: [], reply: JSON.stringify({ reply: 'Title edited.', ops: [{ op: 'update_item', id: 'chat_owned_undo', title: 'The chat title' }] }) },
+    MD_FIXTURE_CHAT_TITLE: { calls: [{ name: 'media_desk_read', arguments: { kind: 'work' } }, { name: 'media_desk_edit', arguments: { operations: JSON.stringify([{ op: 'update_item', id: 'chat_owned_undo', title: 'The chat title' }]), expectedContent: '$versions', resultId: 'title-edit' } }], reply: 'Title edited.' },
     MD_FIXTURE_CHAT_ANSWER: { calls: [], reply: JSON.stringify({ reply: 'An ordinary answer.', ops: [] }) },
   } })
   const data = join(runtime.home, 'media-desk')
@@ -21,24 +21,24 @@ test('对话回执撤销所属编辑，冷恢复后保留后来编辑且普通�
   await runtime.host('ops', { label: 'An earlier body edit', ops: [{ op: 'update_item', id: 'chat_owned_undo', body: 'An earlier accepted body.\n' }] })
   const changed = await runtime.host('chat', { message: 'MD_FIXTURE_CHAT_TITLE', focusId: 'chat_owned_undo' })
   assert.equal(changed.status, 200, JSON.stringify(changed.value))
-  const answer = changed.value.answer
+  await runtime.turn(changed.value.association.sessionId, changed.value.requestId)
+  const beforeLater = (await runtime.host('state')).value.state
+  const undoId = beforeLater.notesUndo.at(-1).id
   await runtime.host('ops', { label: 'A later body edit', ops: [{ op: 'update_item', id: 'chat_owned_undo', body: 'A later accepted body.\n' }] })
   await runtime.stop()
   await runtime.start()
-  const restored = (await runtime.host('state')).value.state.chat.find(message => message.id === answer.id)
-  const undone = await runtime.host('undo', { id: restored.undoId })
+  const restored = (await runtime.host('state')).value.state
+  const undone = await runtime.host('undo', { id: undoId })
   assert.equal(undone.status, 200, JSON.stringify(undone.value))
   assert.equal(undone.value.state.items[0].title, 'The original title')
   assert.equal(undone.value.state.items[0].body, 'A later accepted body.\n')
-  assert.equal(typeof answer.undoId, 'string')
-  assert.equal(restored.undoId, answer.undoId)
-  assert.equal(changed.value.state.notesUndo.some(entry => entry.id === answer.undoId), true)
+  assert.equal(typeof undoId, 'string')
+  assert.equal(restored.notesUndo.some(entry => entry.id === undoId), true)
   await runtime.host('chat/clear', {})
   const ordinary = await runtime.host('chat', { message: 'MD_FIXTURE_CHAT_ANSWER', focusId: 'chat_owned_undo' })
   assert.equal(ordinary.status, 200, JSON.stringify(ordinary.value))
-  assert.equal(ordinary.value.answer.undoable, false)
-  assert.equal(ordinary.value.answer.undoId, null)
-  assert.equal(ordinary.value.state.notesUndo.length, 2)
+  await runtime.turn(ordinary.value.association.sessionId, ordinary.value.requestId)
+  assert.equal((await runtime.host('state')).value.state.notesUndo.length, 2)
 })
 
 test('撤销已切换语言的编辑只还原原语言片段，保留当前语言与后来的外部修改', { timeout: 180000 }, async t => {

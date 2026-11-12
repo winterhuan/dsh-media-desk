@@ -57,9 +57,9 @@ function coerce(type, value) {
       if (value === null) return null
       if (!value || typeof value.src !== 'string') return undefined
       // 媒体只允许插件自己的相对路径或 http(s) 地址
-      const local = /^media-desk\/(assets|files)\/[\w.-]+$/.test(value.src)
+      const local = /^media-desk\/(assets|files|media)\/[\w.-]+$/.test(value.src)
       if (!local && !isHttpUrl(value.src)) return undefined
-      const poster = typeof value.poster === 'string' && (/^media-desk\/(assets|files)\/[\w.-]+$/.test(value.poster) || isHttpUrl(value.poster)) ? value.poster : undefined
+      const poster = typeof value.poster === 'string' && (/^media-desk\/(assets|files|media)\/[\w.-]+$/.test(value.poster) || isHttpUrl(value.poster)) ? value.poster : undefined
       return { src: value.src, ...(poster ? { poster } : {}), ...(Number.isFinite(value.w) ? { w: value.w } : {}), ...(Number.isFinite(value.h) ? { h: value.h } : {}) }
     }
     default: return undefined
@@ -184,7 +184,7 @@ const handlers = {
   update_production(state, op) {
     const item = findById(state.items, op.id)
     if (!item.production) throw new Error(tr('这条灵感还没有成稿'))
-    if (typeof op.title === 'string') item.production.title = op.title.slice(0, 200)
+    if (typeof op.title === 'string') item.title = item.production.title = op.title.slice(0, 200)
     if (typeof op.coverText === 'string') item.production.coverText = op.coverText.slice(0, 40)
     if (typeof op.article === 'string') {
       item.production.article = op.article.slice(0, 200000)

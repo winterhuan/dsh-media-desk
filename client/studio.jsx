@@ -54,8 +54,8 @@ function AutoText({ value, content, onCommit, className, label, disabled }) {
   )
 }
 
-function askAbout(label, text = '') {
-  setDesk({ chatQuote: { label, text }, studioDock: true })
+function askAbout(label, text = '', version = null) {
+  setDesk({ chatQuote: { label, text, version }, studioDock: true })
 }
 
 /** 一张图。空的时候只有底色和淡淡的记号，不放文字。 */
@@ -160,7 +160,7 @@ function HeroTile({ item, live, onView }) {
   const shots = production?.shots ?? []
   const seconds = shots.reduce((sum, shot) => sum + (shot.seconds ?? 0), 0)
   const images = production?.images ?? []
-  const done = production?.status === 'done'
+  const done = ['done', 'partial', 'interrupted'].includes(production?.status)
   const pictures = [production?.cover, ...images].filter(a => a?.src).length
   const showFigures = settings?.imageReady || images.some(a => a?.src)
   const [saving, setSaving] = React.useState(false)
@@ -208,8 +208,8 @@ function HeroTile({ item, live, onView }) {
         ) : null}
       </div>
       <div className="md-collage">
-        <div className="md-collage-main"><Poster production={production} item={item} onOpen={() => onView('cover')} onRetry={settings?.imageReady && production?.status === 'done' && production.cover ? () => regenAsset(item.id, 'cover') : undefined} /></div>
-        {showFigures ? figures.map((image, i) => <div key={i} className={`md-collage-side is-${i}`}><Plate asset={image} alt={image?.caption ?? t('配图 {n}', { n: i + 1 })} onOpen={image?.src ? () => onView(`image:${i}`) : undefined} onRetry={image && settings?.imageReady && production?.status === 'done' ? () => regenAsset(item.id, `image:${i}`) : undefined} /></div>) : null}
+        <div className="md-collage-main"><Poster production={production} item={item} onOpen={() => onView('cover')} onRetry={settings?.imageReady && ['done', 'partial', 'interrupted'].includes(production?.status) && production.cover ? () => regenAsset(item.id, 'cover') : undefined} /></div>
+        {showFigures ? figures.map((image, i) => <div key={i} className={`md-collage-side is-${i}`}><Plate asset={image} alt={image?.caption ?? t('配图 {n}', { n: i + 1 })} onOpen={image?.src ? () => onView(`image:${i}`) : undefined} onRetry={image && settings?.imageReady && ['done', 'partial', 'interrupted'].includes(production?.status) ? () => regenAsset(item.id, `image:${i}`) : undefined} /></div>) : null}
       </div>
       <div className="md-hero-corner">
         {production?.savedAt ? <IconButton icon="folder" label={t('打开保存的文件夹')} onClick={() => revealSaved(item.id)} /> : null}
@@ -335,7 +335,7 @@ function ArticleTile({ item, live, open, onToggle, onView, tileRef }) {
     }
     const rect = selection.getRangeAt(0).getBoundingClientRect()
     const box = tileRef.current.getBoundingClientRect()
-    setPicked({ text: value, x: Math.max(70, Math.min(rect.left - box.left + rect.width / 2, box.width - 70)), y: rect.top - box.top })
+    setPicked({ text: value, version: item.content, x: Math.max(70, Math.min(rect.left - box.left + rect.width / 2, box.width - 70)), y: rect.top - box.top })
   }
   const words = textLength(text)
   return (
@@ -386,7 +386,7 @@ function ArticleTile({ item, live, open, onToggle, onView, tileRef }) {
       )}
       {picked ? (
         <button type="button" className="md-pick" style={{ left: picked.x, top: picked.y }} onMouseDown={e => e.preventDefault()} onClick={() => {
-          askAbout(t('这段'), picked.text)
+          askAbout(t('这段'), picked.text, picked.version)
           setPicked(null)
           window.getSelection()?.removeAllRanges()
         }}><Icon name="chat" size={12} />{t('让助手改这段')}</button>
@@ -424,7 +424,7 @@ function ShotsTile({ item, live, count, open, onToggle, onView }) {
       <div className="md-shots" style={{ '--rows2': Math.ceil(cells.length / 2), '--rows3': Math.ceil(cells.length / 3) }}>
         {cells.map((shot, index) => (
           <figure key={index} className="md-shot">
-            <Plate asset={shot} paper alt={shot.visual} mark={String(shot.no ?? index + 1).padStart(2, '0')} onOpen={shot.src ? () => onView(`shot:${index}`) : undefined} onRetry={imageReady && item.production?.status === 'done' && shot.prompt !== undefined ? () => regenAsset(item.id, `shot:${index}`) : undefined} />
+            <Plate asset={shot} paper alt={shot.visual} mark={String(shot.no ?? index + 1).padStart(2, '0')} onOpen={shot.src ? () => onView(`shot:${index}`) : undefined} onRetry={imageReady && ['done', 'partial', 'interrupted'].includes(item.production?.status) && shot.prompt !== undefined ? () => regenAsset(item.id, `shot:${index}`) : undefined} />
             <figcaption>
               <span className="md-shot-meta"><b>{String(shot.no ?? index + 1).padStart(2, '0')}</b>{shot.shot ? ` ${t(shot.shot)} · ${t('{n} 秒', { n: shot.seconds })}` : ''}</span>
               <p>{shot.voice || shot.visual}</p>
@@ -573,7 +573,7 @@ const DONE_SUGGESTIONS = ['标题再短一点', '语气轻松一点', '开场再
  * @param {(sessionId: string) => void} props.openSession - Open the bound ordinary Session page.
  * @returns {React.ReactElement|null} Selected work, or null while none is open.
  */
-export function Studio({ openSession }) {
+export function Studio({ openSession, retainSession, renderConversation, initializeDraft }) {
   const id = useDesk(s => s.focusId)
   const item = useDesk(s => s.state?.items.find(i => i.id === s.focusId))
   const origin = useDesk(s => s.sheetOrigin)
@@ -622,6 +622,7 @@ export function Studio({ openSession }) {
     <div className={`md-studio ${chatOpen ? 'chat-open' : ''}`} ref={ref} role="dialog" aria-label={t('灵感')}>
       <div className="md-studio-chat">
         <ChatPanel
+          retainSession={retainSession} renderConversation={renderConversation} initializeDraft={initializeDraft}
           itemId={item.id}
           head={(
             <>
@@ -632,9 +633,8 @@ export function Studio({ openSession }) {
             </>
           )}
           top={<IdeaCard item={item} live={live} settings={settings} />}
-          suggestions={production?.status === 'done' ? DONE_SUGGESTIONS.map(row => t(row)) : []}
-          placeholder={running ? t('正在成稿，马上就好') : production?.status === 'done' ? t('想怎么改，直接说') : t('补充点想法，或者直接说要什么')}
-          disabled={running}
+          suggestions={['done', 'partial', 'interrupted'].includes(production?.status) ? DONE_SUGGESTIONS.map(row => t(row)) : []}
+          placeholder={running ? t('正在成稿，马上就好') : ['done', 'partial', 'interrupted'].includes(production?.status) ? t('想怎么改，直接说') : t('补充点想法，或者直接说要什么')}
           intro={false}
         />
       </div>

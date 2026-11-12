@@ -31,16 +31,16 @@ dsh plugin --profile media-desk-dev add "link:$PWD"
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
-Open Media Desk in the sidebar. The package includes its Host entry and browser bundle. The upstream npm package and this fork share panel IDs, routes and data; enable only one in a profile. Workbench state and settings stay under `<DSH_HOME>/media-desk/`, with `~/.dsh` as the default home; registered work text lives in Wiki Notes. The [upstream user guide](GUIDE.md) ([中文](GUIDE.zh.md)) explains the five views, settings, account import and file export; its upstream installation commands do not select this fork.
+Open Media Desk in the sidebar. The package includes its Host entry and browser bundle. The upstream npm package and this fork share panel IDs, routes and data; enable only one in a profile. Workbench state and settings stay under `<DSH_HOME>/media-desk/`, with `~/.dsh` as the default home; registered work text lives in Wiki Notes. The [user guide](GUIDE.md) ([中文](GUIDE.zh.md)) explains the five views, native input, images, recovery and file export.
 
 <a id="native-conversations"></a>
 ### Native conversations
 
-Use **Global native session** in the workbench header or **Native session** in a work's Studio header. Each entry opens DSH's ordinary Session page, with native input, model selection, tool history, questions and approvals. A new work Session uses the work's title; the global Session has a separate assistant title. Native renames are preserved. Closing the workbench or restarting DSH preserves the associated Session; reopen it from the workbench or native workspace tree.
+The embedded assistant renders the ordinary DSH conversation with native input, model selection, tool history, questions and approvals. **Global native session** and **Native session** also open that same Session in the workspace. A new work Session uses the work's title; the global Session has a separate assistant title. Native renames are preserved. Closing the workbench or restarting DSH preserves the associated Session; reopen it from the workbench or native workspace tree.
 
 A new association uses the existing `WIKI_PATH` directory, or `~/wiki` when unset. Host configuration `wikiPath` overrides that choice. The Wiki determines the workspace and `<Wiki>/notes` root; a registered work uses its saved Wiki even for its first Session. Saved work and Session roots survive an environment change, including a symlinked Notes directory. Missing saved Wiki directories are not rebuilt. Changing the native workspace or preset requires restoring the bound Wiki and Media Desk preset before opening it from the workbench again.
 
-The native Session's selected model controls its conversation. The workbench model picker only seeds a new native association. Missing native services, preset or Wiki cause an explicit failure; existing associations remain available for inspection. Keep the same DSH home and restore the required profile components to continue an existing conversation.
+The native Session's selected model controls its conversation. The saved assistant model preference only initializes a new association; native model changes apply to the next unprepared step. Missing native services, preset or Wiki cause an explicit failure; existing associations remain available for inspection. Keep the same DSH home and restore the required profile components to continue an existing conversation.
 
 <a id="notes-work-files"></a>
 ### Notes work files
@@ -129,15 +129,15 @@ Ordinary Session history, loaded skill instructions and selected file contents i
 
 Native conversations use DSH's model adapter and cache behavior. Media Desk adds no cache configuration or hit guarantee.
 
-### Workbench context
+### Creative business tools
 
 #### What the model sees
 
-The assistant receives operation instructions, selected content, a compact workspace snapshot and up to eight recent chat messages for that content. Registered work text is read from Notes for the snapshot. Production calls receive the current work, style, active rules and shared plan through [the prompts](src/ai.js). Replies use `reply`, `ops`, `actions` and optional `revise`; the Host validates edits and rejects stale registered-text versions. Image tools receive image prompts, not the workbench chat history.
+The native Agent reads bounded registered work, frozen writing preferences, selected materials and metrics through [business tools](src/native-context.js). Ordinary edits require actual Session ownership and current Notes versions; selected passages also retain their selection version. Structured plan, article, style and rule candidates require the matched durable successful native turn. Host image workers consume the accepted plan; image tools receive image prompts and no text-model credentials.
 
 #### Token effect
 
-Each request resends its selected context. Longer articles, style samples, rules and revisions increase input tokens; production makes separate planning and writing calls, while image requests use the configured backend.
+Long reads use continuation offsets. Planning and writing use separate native turns in the retained work Session. Style extraction uses explicitly selected samples, while rules remain reviewable proposals. Image requests use the independently configured backend.
 
 #### KV Cache effect
 
@@ -148,9 +148,9 @@ The plugin does not manage a KV cache. Repeated prompt prefixes may be reused by
 <a id="known-limitations-and-deferred-work"></a>
 
 - Compatibility is pinned to the complete DSH `0.2.2-rc.1` Web profile. Scheduling does not publish to platforms, image failures can coexist with a completed production, and interrupted Host jobs require restarting production. Profiles using the same DSH home share workbench data and associations.
-- Native conversations and the embedded workbench assistant have separate histories. The embedded assistant, production and style extraction retain direct model calls. Syntax/build checks and controlled-model fixtures do not establish real model or account-service behavior.
+- All text entry points use native Sessions. Syntax/build checks and controlled-model fixtures do not establish real model quality, paid image-service availability or subscription sign-in. The local acceptance record states the observed real model and browser results.
 - Interrupted or failed native creation stays pending. Inspect `/media-desk/sessions` or `<DSH_HOME>/media-desk/sessions.json` for its error and actual Session ID when available. Automatic replacement and pending-creation recovery are unavailable.
-- Migration preserves legacy work text, drafts, fixed AI originals, saved languages, collected material and editable writing preferences. Sensitive provider settings, metrics and media remain outside Notes. Overlapping inverse edits require conflict repair; failed undo retains its record. Task-owned candidates need their task validation before a save retry can accept them.
+- Migration preserves legacy work text, drafts, fixed AI originals, saved languages, collected material and editable writing preferences. Accepted media uses `notes/assets/<work-id>/`; sensitive provider settings and raw metrics remain outside Notes. Overlapping inverse edits require conflict repair; failed undo retains its record. Task-owned candidates need their task validation before a save retry can accept them.
 - Cooperative locks cover same-machine local Hosts. Ordinary editors do not take them. Retained editor handles can change displaced files after acceptance; subsequent reads preserve both versions and report a conflict. Notes publication and Store acceptance are separate steps, with a recovery journal rather than a filesystem transaction. DSH can force process exit after its five-second shutdown timeout, leaving production interrupted even when the launcher exits with code zero.
 
 ### Dev Note
