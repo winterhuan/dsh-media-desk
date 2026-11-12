@@ -1,4 +1,4 @@
-// 工作台设置。密钥和内容数据分开存放，文件权限 600，也不会返回给浏览器。
+// 工作台设置。密钥留在私有设置文件；个人语气由 Store 投影 Notes 正文。
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tr } from './i18n.js'
@@ -21,10 +21,11 @@ function clamp(value, min, max, fallback) {
 }
 
 export class Settings {
-  constructor(root, owner = null) {
+  constructor(root, owner = null, store = null) {
     this.file = join(root, 'settings.json')
     this.value = null
     this.owner = owner
+    this.store = store
   }
 
   read() {
@@ -39,6 +40,10 @@ export class Settings {
     } catch (err) {
       if (err.code !== 'ENOENT') throw err
       this.value = structuredClone(DEFAULTS)
+    }
+    if (this.store) {
+      const state = await this.store.read()
+      if (typeof state.voice?.text === 'string') this.value.voice = state.voice.text
     }
     return this.value
   }
@@ -95,14 +100,27 @@ export class Settings {
       if (Boolean(provider) !== Boolean(model)) throw Object.assign(new Error(tr('助手模型的提供方和模型要一起填')), { status: 400 })
       next.assistant = { provider, model }
     }
-    if (typeof patch.voice === 'string') next.voice = patch.voice.slice(0, 8000)
+    if (typeof patch.voice === 'string') {
+      const voice = patch.voice.slice(0, 8000)
+      if (this.store) await this.store.updateVoice(voice)
+      else next.voice = voice
+    }
     if (typeof patch.exportDir === 'string') next.exportDir = patch.exportDir.trim().slice(0, 500)
     if (patch.imageCount !== undefined) next.imageCount = clamp(patch.imageCount, 0, 4, current.imageCount)
     if (['auto', 'zh', 'en'].includes(patch.language)) next.language = patch.language
     if (patch.shotCount !== undefined) next.shotCount = clamp(patch.shotCount, 0, 12, current.shotCount)
+    if (this.store) delete next.voice
     await writeFileAtomic(this.file, JSON.stringify(next, null, 2), { mode: 0o600, dirMode: 0o700 })
     this.value = next
-    return next
+    return this.store ? { ...next, voice: (await this.store.read()).voice?.text ?? '' } : next
+  }
+
+  async clearLegacyVoice() {
+    let saved
+    try { saved = JSON.parse(await readFile(this.file, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return; throw error }
+    if (!Object.hasOwn(saved, 'voice')) return
+    delete saved.voice
+    await writeFileAtomic(this.file, JSON.stringify(saved, null, 2), { mode: 0o600, dirMode: 0o700 })
   }
 }
 

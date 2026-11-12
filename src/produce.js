@@ -203,12 +203,20 @@ export class Producer {
     if (item.content && item.content.status !== 'ready') throw Object.assign(new Error(item.content.error), { code: item.content.code, status: 409 })
     if (this.jobs.has(id)) return false
     const job = { stage: 'brief', text: '', planText: '', controller: new AbortController() }
+    const selectedStyle = state.styles?.find(row => row.id === state.activeStyleId)
+    const style = selectedStyle?.preset ? { kind: 'preset', id: selectedStyle.id, presetVersion: state.presetVersion } : selectedStyle?.content
+    const rules = state.skills?.filter(row => !row.sample && ['active', 'exported'].includes(row.status) && row.content).map(row => row.content.snapshot ?? row.content) ?? []
+    const preferenceVersions = {
+      ...(state.voice?.content ? { voice: state.voice.content.snapshot ?? state.voice.content } : {}),
+      ...(style ? { style: style.snapshot ?? style } : {}),
+      rules,
+    }
     this.jobs.set(id, job)
     try {
       await this.store.mutate('开始成稿', (draft) => {
         const target = draft.items.find(row => row.id === id)
         if (!target) throw Object.assign(new Error(tr('找不到这条灵感')), { status: 404 })
-        target.production = { status: 'running', stage: 'brief', startedAt: new Date().toISOString(), title: target.title, current: Boolean(target.content), article: target.content ? target.body : '', cover: null, images: [], shots: [] }
+        target.production = { status: 'running', stage: 'brief', startedAt: new Date().toISOString(), title: target.title, current: Boolean(target.content), article: target.content ? target.body : '', cover: null, images: [], shots: [], preferenceVersions }
         return draft
       }, { undoable: false, expectedContent: item.content ? { [id]: item.content } : {} })
     } catch (error) {

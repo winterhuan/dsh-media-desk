@@ -82,7 +82,7 @@ export async function dispatchOps(ops, { label = t('操作'), undoable = true, s
     setDesk({ state: data.state, canUndo: data.canUndo, undoId: data.undoId })
     if (data.errors?.length && throwOnError) throw new Error(data.errors[0])
     if (data.errors?.length) toast(data.errors[0], { error: true })
-    else if (!silent && data.receipts?.[0]) toast(data.receipts[0].text, { undo: undoable })
+    else if (!silent && data.receipts?.[0]) toast(data.receipts[0].text, { undo: undoable && data.undoable !== false })
     return data
   } catch (err) {
     if (throwOnError) throw err

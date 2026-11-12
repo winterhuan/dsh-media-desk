@@ -158,6 +158,7 @@ export const EN = {
 
   // 收藏与账号档案
   '收藏《{title}》': 'Save "{title}"',
+  '作者样文': 'Author samples',
   更新账号档案: 'Update account profile',
   '添加账号档案「{name}」': 'Added account profile "{name}"',
   '更新账号档案「{name}」': 'Updated account profile "{name}"',

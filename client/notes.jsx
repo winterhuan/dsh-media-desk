@@ -9,7 +9,13 @@ const SAVE_LABELS = { candidate: '候选已保留', pending: '等待保存', pub
 /** @returns {React.ReactElement|null} Recovery controls for retained work and language versions. */
 export function NotesRecoveryDialog() {
   const open = useDesk(state => state.notesRecovery)
-  const legacy = useDesk(state => state.state?.items.some(item => !item.content && (!item.imported || item.production || Object.keys(item.drafts ?? {}).length)))
+  const legacy = useDesk(({ state, settings }) => Boolean(state && (
+    state.items.some(item => !item.content && (!item.imported || item.production || Object.keys(item.drafts ?? {}).length))
+      || state.items.some(item => item.imported && !item.materialContent)
+      || state.styles.some(row => !row.preset && !row.sample && !row.content)
+      || state.skills.some(row => !row.sample && !row.content)
+      || settings?.voice && !state.voice?.content
+  )))
   const [writes, setWrites] = React.useState([])
   const [backups, setBackups] = React.useState([])
   const [loading, setLoading] = React.useState(false)
@@ -91,8 +97,8 @@ export function NotesRecoveryDialog() {
                 : <button type="button" className="md-btn is-small" disabled={pending} onClick={() => run(() => retryNotesSave(save.id))}>{t('重试保存')}</button>}
             </section>) : !error ? <p>{t('没有待恢复的保存')}</p> : null}
           {legacy ? <section className="md-retained-save">
-            <p>{t('旧作品迁移前会创建并验证备份，各语言稿与 AI 原稿保留')}</p>
-            <button type="button" className="md-btn" disabled={pending || loading} onClick={() => run(migrateLegacyNotes)}>{t('迁移旧作品到 Notes')}</button>
+            <p>{t('旧作品和写作资料迁移前会创建并验证备份，语言稿、AI 原稿与来源信息保留')}</p>
+            <button type="button" className="md-btn" disabled={pending || loading} onClick={() => run(migrateLegacyNotes)}>{t('迁移旧内容到 Notes')}</button>
           </section> : null}
           {backups.length ? <details className="md-migration-backups"><summary>{t('迁移备份')}</summary>
             {backups.map(backup => <p key={backup.id}>{backup.verified ? t('备份已验证') : t('备份校验失败')}<br /><span>{backup.path}</span>{backup.error ? <><br />{backup.error}</> : null}</p>)}

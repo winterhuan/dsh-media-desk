@@ -172,10 +172,19 @@ export class Store {
   }
 
   read() {
+    if (this.activeDraft) return Promise.resolve(structuredClone(this.activeDraft))
     return this.run(async () => {
       await this.refresh()
       return this.hydrated()
     })
+  }
+
+  updateVoice(text) {
+    if (this.activeDraft) {
+      this.activeDraft.voice = { ...(this.activeDraft.voice ?? {}), text }
+      return Promise.resolve(this.activeDraft.voice)
+    }
+    return this.mutate(tr('更新个人语气'), draft => { draft.voice = { ...(draft.voice ?? {}), text }; return draft.voice }, { undoable: false })
   }
 
   /**
@@ -206,7 +215,10 @@ export class Store {
       this.notes?.assertExpected(draft, expectedContent)
       const previous = structuredClone(draft)
       const before = undoable && !this.notes ? JSON.stringify(draft) : null
-      const result = await mutate(draft)
+      const parentDraft = this.activeDraft
+      this.activeDraft = draft
+      let result
+      try { result = await mutate(draft) } finally { this.activeDraft = parentDraft }
       const acceptance = await this.commitEdit(previous, draft, { resultKey, payloadHash, label, result, validateAcceptance, undoable, expectedContent })
       if (undoable && !this.notes) {
         const after = JSON.stringify(draft)
@@ -320,12 +332,16 @@ export class Store {
   }
 
   /** Migrate populated work/language text after a verified backup; repeat requests reuse its receipt. */
-  migrateNotes(associations = []) {
+  migrateNotes(associations = [], legacyVoice = '') {
     return this.run(async () => {
       await this.refresh()
       const previous = await this.hydrated()
-      if (this.state.notesMigration) {
-        const acceptance = this.state.receipts?.find(row => row.resultKey === 'migrate:' + this.state.notesMigration.id)
+      const needsContent = (previous.styles ?? []).some(row => !row.preset && !row.sample && !row.content)
+        || (previous.skills ?? []).some(row => !row.sample && !row.content)
+        || (previous.items ?? []).some(row => row.imported && !row.materialContent)
+        || Boolean(legacyVoice && !previous.voice?.content)
+      if (this.state.notesMigration && this.state.contentMigration && !needsContent) {
+        const acceptance = this.state.receipts?.find(row => row.resultKey === 'migrate:' + this.state.contentMigration.id)
         if (acceptance) return { migration: structuredClone(this.state.notesMigration), acceptance: structuredClone(acceptance), state: previous }
       }
       const backup = await this.migration.backup()
@@ -333,12 +349,16 @@ export class Store {
       const pending = this.writes.records.find(row => row.resultKey === resultKey)
       if (pending) return { ...await this.resumeSaved(pending), migration: this.state.notesMigration }
       const draft = structuredClone(previous)
+      if (legacyVoice && !draft.voice?.content) draft.voice = { text: legacyVoice }
       const plan = this.notes.migrationPlan(draft, associations, backup.original)
       await this.notes.preflightMigration(plan)
       const files = await this.notes.prepareMigration(draft, plan)
+      files.push(...await this.notes.prepareManaged(previous, draft))
       for (const item of draft.items) if (item.sample && plan.some(entry => entry.workId === item.id) && sampleText(item.id, 'zh')) item.localeLinked = true
       draft.version = 2
-      draft.notesMigration = { id: backup.id, completedAt: new Date().toISOString(), workIds: [...new Set(plan.map(entry => entry.workId))] }
+      draft.notesMigration ??= { id: backup.id, completedAt: new Date().toISOString(), workIds: [...new Set(plan.map(entry => entry.workId))] }
+      draft.contentMigration = { id: backup.id, completedAt: new Date().toISOString(), styleIds: draft.styles.filter(row => row.content && !row.preset && !row.sample).map(row => row.id),
+        ruleIds: draft.skills.filter(row => row.content && !row.sample).map(row => row.id), materialIds: draft.items.filter(row => row.materialContent).map(row => row.id), voice: Boolean(draft.voice?.content) }
       const acceptance = await this.commitFiles(previous, draft, files, { resultKey, payloadHash: backup.sourceHash, label: tr('迁移作品到 Notes'), result: { migration: draft.notesMigration } })
       return { migration: draft.notesMigration, acceptance, state: await this.hydrated() }
     })

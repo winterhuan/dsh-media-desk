@@ -493,7 +493,8 @@ export function importPosts(draft, { account, profile, posts, covers = new Map()
     if (!item) {
       item = {
         id: newId('it'), kind: 'web', title: post.title, body: post.body, tags: [], status: 'published', personaIds: [], drafts: {},
-        createdAt: post.publishedAt, publishedAt: post.publishedAt, scheduledAt: post.publishedAt, platform, url: post.url, source: nickname, media: null, imported: true, externalId,
+        createdAt: post.publishedAt, publishedAt: post.publishedAt, collectedAt: now, scheduledAt: post.publishedAt, platform, url: post.url, source: nickname, media: null,
+        imported: true, materialType: 'source', completeness: 'complete', externalId,
       }
       draft.items.push(item)
       added += 1

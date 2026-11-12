@@ -46,7 +46,7 @@ export async function notesUndoEntry(record, filesDir, before) {
     return ITEM_FIELDS.has(field) || field === 'production' && PRODUCTION_FIELDS.has(change.path[3])
   }).map(change => ({ ...change, before: change.before.present ? { present: true, value: undoValue(change.before.value, change.path) } : change.before,
     after: change.after.present ? { present: true, value: undoValue(change.after.value, change.path) } : change.after }))
-  const files = record.files.filter(file => file.before).map(file => ({ workId: file.workId, before: file.beforeSnapshot, after: file.candidate, primary: withoutRuntime(file.after) }))
+  const files = record.files.filter(file => (file.kind ?? 'work') === 'work' && file.before).map(file => ({ workId: file.workId, before: file.beforeSnapshot, after: file.candidate, primary: withoutRuntime(file.after) }))
   const languages = Object.fromEntries(before.items.filter(item => !item.content && changes.some(change => change.path[0] === 'items' && change.path[1]?.id === item.id))
     .map(item => [item.id, item.language ?? (item.sample ? before.sampleLang : 'und') ?? 'und']))
   if (!changes.length && !files.length) return null

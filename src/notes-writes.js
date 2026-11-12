@@ -1,8 +1,8 @@
-/** Recoverable Notes publication preserves candidates and every displaced editor inode. */
+/** Recoverable Notes publication preserves candidates and every displaced editor inode for managed content. */
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { copyFile, link, lstat, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { stateChanges } from './state-changes.js'
 import { notesUndoEntry } from './notes-undo.js'
@@ -68,21 +68,24 @@ export class NotesWrites {
    * Save independent file inodes before the pending record authorizes primary displacement.
    * @param {object} before - Hydrated accepted state.
    * @param {object} draft - Hydrated proposed state; its references gain fixed snapshots.
-   * @param {object[]} files - Proposed primary changes with actual accepted preimage bytes.
+   * @param {object[]} files - Proposed work, material or preference changes with accepted preimage bytes.
    * @param {object} options - Save identity, label, caller outcome and recovery eligibility.
    * @returns {Promise<object>} Complete immutable proposal with a durable pending record.
    */
   async prepare(before, draft, files, { resultKey = randomUUID(), payloadHash, label, outcome, requiresValidation = false, undoable = false, undoOf, expectedContent = {} }) {
     const id = randomUUID()
     const entries = files.map(file => {
-      const location = `history/${encodeURIComponent(file.workId)}/${id}-${file.after.language}`
+      const subjectId = file.subjectId ?? file.workId
+      const kind = file.kind ?? 'work'
+      const language = file.after.language ?? 'und'
+      const location = `history/${encodeURIComponent(subjectId)}/${id}-${kind}-${language}`
       const reference = suffix => ({ wikiRoot: file.after.wikiRoot, notesRoot: file.after.notesRoot,
-        relativePath: `${location}-${suffix}.md`, language: file.after.language,
+        relativePath: `${location}-${suffix}.md`, ...(kind === 'work' ? { language } : { kind, id: subjectId }),
         ...(['candidate', 'before'].includes(suffix) ? { role: 'work-snapshot' } : {}),
         sha256: suffix === 'displaced' || suffix === 'before' ? file.before?.sha256 : file.after.sha256 })
       const candidate = reference('candidate')
       file.after.snapshot = candidate
-      return { workId: file.workId, language: file.after.language, before: file.before, after: structuredClone(file.after), candidate,
+      return { subjectId, kind, ...(kind === 'work' ? { workId: subjectId, language } : {}), before: file.before, after: structuredClone(file.after), candidate,
         publication: reference('publication'), ...(file.before ? { displaced: reference('displaced'), displacements: [], beforeSnapshot: file.before.snapshot ?? reference('before') } : {}), phase: 'prepared' }
     })
     const after = this.store.notes.durable(draft)
@@ -97,9 +100,10 @@ export class NotesWrites {
     }
     payloadHash ??= hash(JSON.stringify(changes))
     const receipt = { id, resultKey, payloadHash, acceptedAt: new Date().toISOString(),
-      contentVersions: [...entries.map(entry => ({ workId: entry.workId, ...entry.after })),
+      contentVersions: [...entries.filter(entry => entry.kind === 'work').map(entry => ({ workId: entry.workId, ...entry.after })),
         ...draft.items.filter(item => item.content && !entries.some(entry => entry.workId === item.id && entry.language === item.content.language)
-          && JSON.stringify(item.content) !== JSON.stringify(before.items.find(row => row.id === item.id)?.content)).map(item => ({ workId: item.id, ...item.content }))], outcome }
+          && JSON.stringify(item.content) !== JSON.stringify(before.items.find(row => row.id === item.id)?.content)).map(item => ({ workId: item.id, ...item.content }))],
+      resources: entries.filter(entry => entry.kind !== 'work').map(entry => ({ subjectId: entry.subjectId, kind: entry.kind, ...entry.after })), outcome }
     const record = { version: 1, id, resultKey, payloadHash, label, createdAt: receipt.acceptedAt,
       status: 'candidate', files: entries, changes, references: [...references.values()], receipt, requiresValidation }
     if (undoable) record.undoEntry = await notesUndoEntry(record, this.store.filesDir, before)
@@ -111,7 +115,7 @@ export class NotesWrites {
       for (let index = 0; index < files.length; index++) {
         const file = files[index]
         const entry = entries[index]
-        await this.store.notes.createDirectory(entry.after.notesRoot, `history/${encodeURIComponent(entry.workId)}`)
+        await this.store.notes.createDirectory(entry.after.notesRoot, `history/${encodeURIComponent(entry.subjectId)}`)
         await writeFile(join(entry.candidate.notesRoot, entry.candidate.relativePath), file.bytes, { flag: 'wx', mode: 0o600 })
         if (entry.beforeSnapshot && !file.before.snapshot) {
           await writeFile(join(entry.beforeSnapshot.notesRoot, entry.beforeSnapshot.relativePath), file.beforeBytes, { flag: 'wx', mode: 0o600 })
@@ -193,7 +197,7 @@ export class NotesWrites {
         }
         if (entry.before && !displaced) {
           if (!primary) throw failure('notes/missing', tr('已接受作品文件缺失，请重新关联后重试'))
-          await this.store.notes.readWork(entry.before, entry.workId)
+          await this.store.notes.readPrimary(entry.before, entry.subjectId, entry.kind)
           await rename(join(entry.before.notesRoot, entry.before.relativePath), join(entry.displaced.notesRoot, entry.displaced.relativePath))
           entry.phase = 'displaced'
           entry.displacements ??= []
@@ -205,7 +209,7 @@ export class NotesWrites {
           await this.restore(entry)
           throw failure('notes/publication-conflict', tr('捕获的外部版本与已接受作品不同，双方版本已保留'))
         }
-        await this.store.notes.createDirectory(entry.after.notesRoot, 'works')
+        await this.store.notes.createDirectory(entry.after.notesRoot, dirname(entry.after.relativePath))
         try { await link(join(entry.publication.notesRoot, entry.publication.relativePath), join(entry.after.notesRoot, entry.after.relativePath)) } catch (error) {
           if (error.code === 'EEXIST') throw failure('notes/publication-conflict', tr('发布期间外部编辑器保存了正文，外部文件已保留'))
           await this.restore(entry)
@@ -236,9 +240,9 @@ export class NotesWrites {
         if (hash(bytes) !== reference.sha256) throw failure('notes/publication-conflict', tr('接受前正文或保留的外部版本已变化，请先核对版本'))
       }
     }
-    const subjects = new Set([...record.files.map(entry => entry.workId), ...record.changes.filter(change => change.path[0] === 'items').map(change => change.path[1]?.id)])
+    const subjects = new Set([...record.files.map(entry => entry.subjectId ?? entry.workId), ...record.changes.filter(change => change.path[0] === 'items').map(change => change.path[1]?.id)])
     for (const saved of this.records) for (const entry of saved.files) {
-      if (!subjects.has(entry.workId)) continue
+      if (!subjects.has(entry.subjectId ?? entry.workId)) continue
       for (const reference of entry.displacements ?? []) {
         const expected = saved.resolutions?.[reference.relativePath]?.sha256 ?? reference.sha256
         if (hash(this.store.notes.readBytesSync(reference)) !== expected) {
@@ -270,11 +274,11 @@ export class NotesWrites {
           const expectedSha256 = record.resolutions?.[reference.relativePath]?.sha256 ?? reference.sha256
           if (observedSha256 !== expectedSha256) {
             let identity = reference.relativePath
-            if (bytes) { const info = await lstat(join(reference.notesRoot, reference.relativePath)); identity = `${entry.workId}:${entry.language}:${info.dev}:${info.ino}:${observedSha256}` }
+            if (bytes) { const info = await lstat(join(reference.notesRoot, reference.relativePath)); identity = `${entry.subjectId ?? entry.workId}:${entry.language ?? entry.kind}:${info.dev}:${info.ino}:${observedSha256}` }
             const existing = inodes.get(identity)
             if (existing) existing.aliases.push(structuredClone(reference))
             else {
-              const conflict = { workId: entry.workId, language: entry.language, reference: structuredClone(reference), aliases: [structuredClone(reference)], expectedSha256, observedSha256 }
+              const conflict = { ...(entry.workId ? { workId: entry.workId } : { subjectId: entry.subjectId, kind: entry.kind }), language: entry.language, reference: structuredClone(reference), aliases: [structuredClone(reference)], expectedSha256, observedSha256 }
               record.observedConflicts.push(conflict)
               inodes.set(identity, conflict)
             }

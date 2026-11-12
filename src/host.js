@@ -33,6 +33,8 @@ const MAX_UPLOAD = 250_000_000
 const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' }
 const UPLOAD_EXT = Object.fromEntries(Object.entries(MIME).filter(([ext]) => ext !== '.jpeg').map(([ext, type]) => [type, ext]))
 const SERIAL_ROUTES = new Set(['ops', 'undo', 'settings', 'upload', 'produce', 'produce/cancel', 'produce/regen', 'produce/save', 'skills/export', 'notes/register', 'notes/relink', 'notes/retry', 'notes/resolve', 'notes/version', 'notes/saves', 'notes/migrate', 'notes/migrations', 'notes/language', 'chat/clear', 'sessions/open', 'sessions', 'state', 'production'])
+const editsPreferenceText = ops => (Array.isArray(ops) ? ops : []).some(op => op?.op === 'update_style'
+  || op?.op === 'update_skill' && ['name', 'rule', 'source', 'evidence'].some(key => op[key] !== undefined))
 
 function json(res, status, body) {
   res.statusCode = status
@@ -165,7 +167,8 @@ async function chatTurn(ctx, store, desk, body) {
       targets = canDraw ? revision.targets : []
     }
     return { receipts, errors, targets, done: Boolean(production) }
-  }, { expectedContent, resultKey: newId('chat'), payloadHash: createHash('sha256').update(JSON.stringify({ message, focusId, plan, expectedContent })).digest('hex') })
+  }, { undoable: !editsPreferenceText(plan.ops), expectedContent, resultKey: newId('chat'),
+    payloadHash: createHash('sha256').update(JSON.stringify({ message, focusId, plan, expectedContent })).digest('hex') })
   const result = await store.mutate('对话记录', (draft) => {
     const { receipts, errors, targets, done } = changed
     const at = new Date().toISOString()
@@ -224,11 +227,14 @@ async function styleFromMaterial(ctx, store, { material, name, source, sourceUrl
   return store.mutate(tr('提炼风格「{name}」', { name: style.name }), (draft) => {
     const existing = accountKey ? (draft.styles ?? []).find(row => row.accountKey === accountKey) : null
     const id = existing?.id ?? newId('st')
-    const row = { id, ...style, source, sourceUrls, ...(accountKey ? { accountKey } : {}), createdAt: existing?.createdAt ?? new Date().toISOString() }
+    const createdAt = existing?.createdAt ?? new Date().toISOString()
+    const row = { id, ...style, source, sourceUrls, ...(accountKey ? { accountKey } : {}), createdAt,
+      sampleMaterial: { title: `${style.name} · ${tr('作者样文')}`, body: material, source, url: sourceUrls[0], collectedAt: new Date().toISOString(),
+        materialType: 'author-sample', completeness: sourceUrls.length ? 'complete' : 'excerpt', externalId: accountKey, styleId: id, selectedAuthorSample: true } }
     draft.styles = existing ? draft.styles.map(entry => (entry.id === id ? row : entry)) : [row, ...(draft.styles ?? [])]
     draft.activeStyleId = id
     return { id, failures, state: draft }
-  })
+  }, { undoable: false })
 }
 
 /** 导入用户自己的账号。钱花在 Monid 上，所以先把内容存好，提炼失败也不会白花。 */
@@ -365,7 +371,11 @@ async function route(ctx, store, desk, req, res) {
   if (path === 'upload') return handleUpload(req, store, res)
   const body = await readJson(req)
   switch (path) {
-    case 'notes/migrate': return json(res, 200, await store.migrateNotes(await desk.nativeSessions.list()))
+    case 'notes/migrate': {
+      const result = await store.migrateNotes(await desk.nativeSessions.list(), (await desk.settings.read()).voice)
+      await desk.settings.clearLegacyVoice()
+      return json(res, 200, result)
+    }
     case 'notes/language': {
       const result = await store.mutate(tr('切换作品语言'), async draft => {
         const item = draft.items.find(row => row.id === body.id)
@@ -394,12 +404,13 @@ async function route(ctx, store, desk, req, res) {
       return json(res, 200, { association: await desk.nativeSessions.open(body.workId ?? null) })
     case 'ops': {
       const label = typeof body.label === 'string' ? body.label : tr('操作')
+      const undoable = body.undoable !== false && !editsPreferenceText(body.ops)
       const result = await store.mutate(label, (draft) => {
         const applied = applyOps(draft, body.ops)
         return { ...applied, state: draft }
-      }, { undoable: body.undoable !== false, expectedContent: body.expectedContent ?? {}, resultKey: body.resultKey,
+      }, { undoable, expectedContent: body.expectedContent ?? {}, resultKey: body.resultKey,
         payloadHash: createHash('sha256').update(JSON.stringify({ ops: body.ops, expectedContent: body.expectedContent ?? {} })).digest('hex') })
-      return json(res, 200, { ...result, canUndo: store.canUndo, undoId: store.undoId })
+      return json(res, 200, { ...result, undoable, canUndo: store.canUndo, undoId: store.undoId })
     }
     case 'undo': {
       const label = await store.undoLast(body.id)
@@ -534,7 +545,7 @@ export default class MediaDeskHost extends Service {
     ctx.effect(() => () => this.close(), 'media-desk: writer ownership')
     await ownership.acquire()
     const store = new Store(ownership.dataRoot, ownership)
-    const settings = new Settings(store.root, ownership)
+    const settings = new Settings(store.root, ownership, store)
     const producer = new Producer({
       store, settings, callText: options => callModel(ctx, { ...options, signal: AbortSignal.any([ownership.signal, ...(options.signal ? [options.signal] : [])]) }),
       ready: saved => imageReady(saved, Boolean(imageTool(ctx))),

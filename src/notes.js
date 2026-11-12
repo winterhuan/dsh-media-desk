@@ -1,4 +1,4 @@
-/** Registered work Markdown supplies current text; Store projections never become a second primary. */
+/** Registered work, material and preference Markdown supplies editable text; Store retains references and operational state. */
 import { createHash, randomUUID } from 'node:crypto'
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs'
 import { lstat, mkdir, open, realpath, writeFile } from 'node:fs/promises'
@@ -8,6 +8,9 @@ import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { tr } from './i18n.js'
 
 const METADATA = ['title', 'tags', 'source', 'url', 'language', 'noteMetadata']
+const STYLE_TEXT = ['name', 'icon', 'summary', 'tone', 'sentences', 'opening', 'structure', 'words', 'avoid', 'samples', 'source', 'sourceUrls']
+const RULE_TEXT = ['name', 'rule', 'source', 'evidence']
+const MATERIAL_TEXT = ['title', 'body', 'source', 'url', 'createdAt', 'publishedAt', 'collectedAt', 'materialType', 'completeness', 'externalId', 'styleId', 'selectedAuthorSample']
 /** Fields retained with a work's language when selection or undo targets another language. */
 export const LANGUAGE_FIELDS = [...METADATA, 'body', 'content', 'media', 'drafts', 'production', 'sourceContent', 'textHistory', 'languageBasis']
 const fingerprint = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -21,7 +24,7 @@ export function notesSaveMessage(error) {
   return /^E[A-Z0-9]+$/.test(error.code ?? '') ? tr('保存失败，请检查保存位置和写入权限后重试') : error.message
 }
 
-/** Current work files, registered by stable work identity and explicit language. */
+/** Owned Notes files, registered by stable domain identity and explicit work language where applicable. */
 export class Notes {
   constructor(owner) {
     this.wikiRoot = owner.wikiRoot
@@ -58,16 +61,26 @@ export class Notes {
     const link = (title, path) => `- [${title.replace(/[\[\]\\]/g, '\\$&').replace(/[\r\n]/g, ' ')}](<${path.split('/').map(encodeURIComponent).join('/')}>)`
     for (const root of this.roots) {
       const works = state.items.filter(item => item.content?.notesRoot === root).sort((a, b) => a.id.localeCompare(b.id))
+      const materials = [
+        ...state.items.filter(item => item.sourceContent?.notesRoot === root).map(item => ({ id: `source:${item.id}`, title: item.title, path: item.sourceContent.relativePath })),
+        ...state.items.filter(item => item.materialContent?.notesRoot === root).map(item => ({ id: `material:${item.id}`, title: item.title, path: item.materialContent.relativePath })),
+        ...state.styles.filter(row => row.sampleContent?.notesRoot === root && !row.preset && !row.sample).map(row => ({ id: `style-samples:${row.id}`, title: `${row.name} · ${tr('作者样文')}`, path: row.sampleContent.relativePath })),
+      ].sort((a, b) => a.id.localeCompare(b.id))
+      const preferences = [
+        ...state.styles.filter(row => row.content?.notesRoot === root && !row.preset && !row.sample).map(row => ({ id: `style:${row.id}`, title: row.name, path: row.content.relativePath })),
+        ...state.skills.filter(row => row.content?.notesRoot === root && !row.sample).map(row => ({ id: `rule:${row.id}`, title: row.name, path: row.content.relativePath })),
+        ...(state.voice?.content?.notesRoot === root ? [{ id: 'voice', title: tr('个人语气'), path: state.voice.content.relativePath }] : []),
+      ].sort((a, b) => a.id.localeCompare(b.id))
       let bytes = null
       try { bytes = await this.readBytes({ notesRoot: root, relativePath: 'index.md' }) } catch (error) { if (error.code !== 'notes/missing') throw error }
       const old = bytes?.toString('utf8') ?? '# Notes\n'
       const opening = old.split(start).length - 1
       const closing = old.split(end).length - 1
       if (opening !== closing || opening > 1 || opening && old.indexOf(end) < old.indexOf(start)) throw failure('notes/index-invalid', tr('Notes 索引中的作品导航标记无效，请修复索引文件'))
-      if (!works.length && !opening) continue
-      const sources = works.filter(item => item.sourceContent)
+      if (!works.length && !materials.length && !preferences.length && !opening) continue
       const section = [start, '## Works', '', ...works.map(item => link(item.title, item.content.relativePath)),
-        ...(sources.length ? ['', '## Materials', '', ...sources.map(item => link(item.title, item.sourceContent.relativePath))] : []), end].join('\n')
+        ...(materials.length ? ['', '## Materials', '', ...materials.map(item => link(item.title, item.path))] : []),
+        ...(preferences.length ? ['', '## Preferences', '', ...preferences.map(item => link(item.title, item.path))] : []), end].join('\n')
       const next = opening ? old.slice(0, old.indexOf(start)) + section + old.slice(old.indexOf(end) + end.length)
         : old + (old.endsWith('\n') ? '\n' : '\n\n') + section + '\n'
       if (next === old) continue
@@ -183,6 +196,72 @@ export class Notes {
     if (!/^works\/[^/\\]+\.md$/.test(reference.relativePath)) throw failure('notes/path-invalid', tr('作品文件必须位于 Notes 的 works 目录中'))
     const bytes = await this.readBytes(reference)
     return { ...this.parse(bytes, reference, id), sha256: fingerprint(bytes), bytes }
+  }
+
+  managedPath(kind, id) {
+    if (kind === 'voice') return 'preferences/voice.md'
+    if (kind === 'style') return `preferences/styles/${encodeURIComponent(id)}.md`
+    if (kind === 'rule') return `preferences/rules/${encodeURIComponent(id)}.md`
+    if (kind === 'material') return `materials/${encodeURIComponent(id)}.md`
+    throw new Error(`Unsupported Notes content kind: ${kind}`)
+  }
+
+  managedDocument(kind, id, row) {
+    const updatedAt = new Date().toISOString()
+    if (kind === 'voice') return `---\n${stringify({ format: 1, kind, id, updatedAt })}---\n\n${row.text ?? ''}`
+    const fields = kind === 'style' ? STYLE_TEXT : kind === 'rule' ? RULE_TEXT : MATERIAL_TEXT.filter(key => key !== 'body')
+    const data = Object.fromEntries(fields.filter(key => row[key] !== undefined).map(key => [key, structuredClone(row[key])]))
+    const metadata = { format: 1, kind, id, updatedAt, data }
+    return `---\n${stringify(metadata)}---\n\n${kind === 'material' ? row.body ?? '' : ''}`
+  }
+
+  parseManaged(bytes, reference, id, kind) {
+    const { metadata, body } = this.decode(bytes)
+    if (metadata?.format !== 1 || metadata.kind !== kind || metadata.id !== id
+      || typeof metadata.updatedAt !== 'string' || !Number.isFinite(Date.parse(metadata.updatedAt))) {
+      throw failure('notes/metadata-invalid', tr('Notes 内容文件缺少有效的 YAML 元数据'))
+    }
+    if (kind === 'voice') return { metadata, value: { text: body } }
+    if (!metadata.data || typeof metadata.data !== 'object' || Array.isArray(metadata.data)) {
+      throw failure('notes/metadata-invalid', tr('Notes 内容文件缺少有效的 YAML 元数据'))
+    }
+    const fields = kind === 'style' ? STYLE_TEXT : kind === 'rule' ? RULE_TEXT : MATERIAL_TEXT.filter(key => key !== 'body')
+    const value = Object.fromEntries(fields.filter(key => metadata.data[key] !== undefined).map(key => [key, structuredClone(metadata.data[key])]))
+    if (kind === 'style') {
+      const lists = new Set(['words', 'avoid', 'samples', 'sourceUrls'])
+      if (typeof value.name !== 'string' || fields.some(key => value[key] !== undefined && (lists.has(key)
+        ? !Array.isArray(value[key]) || value[key].some(entry => typeof entry !== 'string') : typeof value[key] !== 'string'))) {
+        throw failure('notes/metadata-invalid', tr('Notes 风格文件缺少有效内容'))
+      }
+    } else if (kind === 'rule') {
+      if (typeof value.name !== 'string' || typeof value.rule !== 'string' || fields.some(key => value[key] !== undefined && typeof value[key] !== 'string')) {
+        throw failure('notes/metadata-invalid', tr('Notes 规则文件缺少有效内容'))
+      }
+    } else if (typeof value.title !== 'string' || fields.some(key => value[key] !== undefined && (key === 'selectedAuthorSample'
+      ? typeof value[key] !== 'boolean' : typeof value[key] !== 'string'))
+      || ['createdAt', 'publishedAt', 'collectedAt'].some(key => value[key] !== undefined && !Number.isFinite(Date.parse(value[key])))
+      || value.completeness !== undefined && !['complete', 'excerpt', 'summary'].includes(value.completeness)) {
+      throw failure('notes/metadata-invalid', tr('Notes 材料文件缺少有效内容'))
+    }
+    if (kind === 'material') value.body = body
+    return { metadata, value }
+  }
+
+  async readManaged(reference, id, kind) {
+    if (reference.relativePath !== this.managedPath(kind, id)) throw failure('notes/path-invalid', tr('Notes 内容文件路径与登记身份不符'))
+    const bytes = await this.readBytes(reference)
+    return { ...this.parseManaged(bytes, reference, id, kind), sha256: fingerprint(bytes), bytes }
+  }
+
+  async readPrimary(reference, id, kind = 'work') {
+    return kind === 'work' ? this.readWork(reference, id) : this.readManaged(reference, id, kind)
+  }
+
+  async saveManagedSnapshot(reference, id, kind, bytes) {
+    const relativePath = `history/${encodeURIComponent(id)}/${randomUUID()}-${kind}.md`
+    await this.createDirectory(reference.notesRoot, `history/${encodeURIComponent(id)}`)
+    await writeFile(join(reference.notesRoot, relativePath), bytes, { mode: 0o600, flag: 'wx' })
+    return { wikiRoot: reference.wikiRoot, notesRoot: reference.notesRoot, relativePath, sha256: fingerprint(bytes), role: `${kind}-snapshot`, kind, id }
   }
 
   async saveSnapshot(reference, id, bytes) {
@@ -326,6 +405,44 @@ export class Notes {
       source: metadata.sources[0]?.label ?? '', url: metadata.sources[0]?.url ?? null })
   }
 
+  managedFields(kind) {
+    return kind === 'style' ? STYLE_TEXT : kind === 'rule' ? RULE_TEXT : kind === 'voice' ? ['text'] : MATERIAL_TEXT
+  }
+
+  async hydrateManagedRow(state, stored, projected, kind, referenceKey = 'content') {
+    const reference = projected?.[referenceKey]
+    if (!reference) return
+    const subjectId = kind === 'voice' ? 'personal-voice' : projected.id
+    state.contentRevisions ??= {}
+    const revisionKey = `${kind}:${subjectId}`
+    if (!Number.isSafeInteger(reference.revision)) reference.revision = Math.max(1, state.contentRevisions[revisionKey] ?? 0)
+    try {
+      const { value, sha256, bytes } = await this.readManaged(reference, subjectId, kind)
+      if (sha256 !== reference.sha256) {
+        reference.sha256 = sha256
+        reference.revision = Math.max(reference.revision, state.contentRevisions[revisionKey] ?? 0) + 1
+        reference.snapshot = await this.saveManagedSnapshot(reference, subjectId, kind, bytes)
+      }
+      if (!reference.snapshot) reference.snapshot = await this.saveManagedSnapshot(reference, subjectId, kind, bytes)
+      reference.status = 'ready'
+      delete reference.code
+      delete reference.error
+      for (const field of this.managedFields(kind)) {
+        if (value[field] === undefined) delete projected[field]
+        else projected[field] = structuredClone(value[field])
+      }
+    } catch (error) {
+      reference.status = error.code === 'notes/missing' ? 'missing' : 'invalid'
+      reference.code = error.code
+      reference.error = error.message
+      for (const field of this.managedFields(kind)) delete projected[field]
+    }
+    const saved = structuredClone(reference)
+    delete saved.error
+    stored[referenceKey] = saved
+    state.contentRevisions[revisionKey] = Math.max(state.contentRevisions[revisionKey] ?? 0, saved.revision)
+  }
+
   async hydrate(state) {
     if (state.items.some(item => item.content)) state.notesRevisions ??= {}
     const projected = structuredClone(state)
@@ -395,8 +512,105 @@ export class Notes {
         item.otherLang[language] = Object.fromEntries(LANGUAGE_FIELDS.filter(field => current[field] !== undefined).map(field => [field, current[field]]))
       }
     }
+    for (let index = 0; index < (projected.styles ?? []).length; index++) {
+      const row = projected.styles[index]
+      if (!row.preset && !row.sample) {
+        await this.hydrateManagedRow(state, state.styles[index], row, 'style')
+        if (row.sampleContent) {
+          const storedSample = { id: `${row.id}-samples`, sampleContent: state.styles[index].sampleContent }
+          const projectedSample = { id: `${row.id}-samples`, sampleContent: row.sampleContent }
+          await this.hydrateManagedRow(state, storedSample, projectedSample, 'material', 'sampleContent')
+          state.styles[index].sampleContent = storedSample.sampleContent
+          row.sampleContent = projectedSample.sampleContent
+          row.sampleMaterial = Object.fromEntries(MATERIAL_TEXT.filter(field => projectedSample[field] !== undefined).map(field => [field, projectedSample[field]]))
+        }
+      }
+    }
+    for (let index = 0; index < (projected.skills ?? []).length; index++) {
+      const row = projected.skills[index]
+      if (!row.sample) await this.hydrateManagedRow(state, state.skills[index], row, 'rule')
+    }
+    if (projected.voice?.content) await this.hydrateManagedRow(state, state.voice, projected.voice, 'voice')
+    for (let index = 0; index < projected.items.length; index++) {
+      const row = projected.items[index]
+      if (row.imported && row.materialContent) await this.hydrateManagedRow(state, state.items[index], row, 'material', 'materialContent')
+    }
     if (state.notesRevisions) projected.notesRevisions = structuredClone(state.notesRevisions)
+    if (state.contentRevisions) projected.contentRevisions = structuredClone(state.contentRevisions)
     return projected
+  }
+
+  async prepareManagedRow(before, row, kind, referenceKey = 'content') {
+    const id = kind === 'voice' ? 'personal-voice' : row.id
+    if (kind === 'material') {
+      row.collectedAt ??= new Date().toISOString()
+      row.materialType ??= 'source'
+      row.completeness ??= 'complete'
+    }
+    const oldReference = before?.[referenceKey]
+    const fields = this.managedFields(kind)
+    const changed = !oldReference || !before || fields.some(key => JSON.stringify(row[key]) !== JSON.stringify(before[key]))
+    if (oldReference && !changed) {
+      row[referenceKey] = structuredClone(oldReference)
+      return null
+    }
+    if (!oldReference && !this.canCreate) throw failure('wiki/unavailable', tr('Wiki 目录不可用：{path}。请检查 WIKI_PATH', { path: this.wikiRoot }), 503)
+    let current = null
+    if (oldReference) {
+      if (oldReference.status !== 'ready') throw failure(oldReference.code, oldReference.error)
+      current = await this.readManaged(oldReference, id, kind)
+      if (current.sha256 !== oldReference.sha256) throw failure('notes/conflict', tr('Notes 内容已变化，请重新读取后再修改'))
+    }
+    const bytes = this.managedDocument(kind, id, row)
+    const revisionKey = `${kind}:${id}`
+    const revision = Math.max((row[referenceKey]?.revision ?? 0) + 1, (before?.[referenceKey]?.revision ?? 0) + 1)
+    const reference = oldReference
+      ? { ...oldReference, revision, sha256: fingerprint(bytes), status: 'ready' }
+      : { wikiRoot: this.wikiRoot, notesRoot: this.root, relativePath: this.managedPath(kind, id), revision: Math.max(1, revision), sha256: fingerprint(bytes), status: 'ready', kind }
+    delete reference.code
+    delete reference.error
+    row[referenceKey] = reference
+    return { subjectId: id, kind, before: oldReference ?? null, after: reference, beforeBytes: current?.bytes, bytes, revisionKey }
+  }
+
+  async prepareManaged(before, draft) {
+    const files = []
+    draft.contentRevisions ??= {}
+    const previousStyles = new Map((before.styles ?? []).map(row => [row.id, row]))
+    for (const row of draft.styles ?? []) if (!row.preset && !row.sample) {
+      const file = await this.prepareManagedRow(previousStyles.get(row.id), row, 'style')
+      if (file) files.push(file)
+      const old = previousStyles.get(row.id)
+      const sample = row.sampleMaterial ?? (!row.sampleContent && row.samples?.length ? {
+        title: `${row.name} · ${tr('作者样文')}`, body: row.samples.join('\n\n'), source: row.source,
+        url: row.sourceUrls?.[0], collectedAt: row.createdAt, materialType: 'author-sample', completeness: 'excerpt',
+        externalId: row.accountKey, styleId: row.id, selectedAuthorSample: true,
+      } : null)
+      if (sample) {
+        const sampleRow = { id: `${row.id}-samples`, ...sample, sampleContent: row.sampleContent }
+        const oldSample = old ? { id: sampleRow.id, ...(old.sampleMaterial ?? {}), sampleContent: old.sampleContent } : undefined
+        const sampleFile = await this.prepareManagedRow(oldSample, sampleRow, 'material', 'sampleContent')
+        row.sampleContent = sampleRow.sampleContent
+        row.sampleMaterial = Object.fromEntries(MATERIAL_TEXT.filter(field => sampleRow[field] !== undefined).map(field => [field, sampleRow[field]]))
+        if (sampleFile) files.push(sampleFile)
+      }
+    }
+    const previousRules = new Map((before.skills ?? []).map(row => [row.id, row]))
+    for (const row of draft.skills ?? []) if (!row.sample) {
+      const file = await this.prepareManagedRow(previousRules.get(row.id), row, 'rule')
+      if (file) files.push(file)
+    }
+    if (draft.voice) {
+      const file = await this.prepareManagedRow(before.voice, draft.voice, 'voice')
+      if (file) files.push(file)
+    }
+    const previousItems = new Map((before.items ?? []).map(row => [row.id, row]))
+    for (const row of draft.items ?? []) if (row.imported) {
+      const file = await this.prepareManagedRow(previousItems.get(row.id), row, 'material', 'materialContent')
+      if (file) files.push(file)
+    }
+    for (const file of files) draft.contentRevisions[file.revisionKey] = file.after.revision
+    return files
   }
 
   /** Validate an explicitly selected replacement; changes only the registered reference. */
@@ -654,6 +868,7 @@ export class Notes {
       await this.saveHistory(item, null, false)
       files.push({ workId: item.id, before: null, after: item.content, bytes })
     }
+    files.push(...await this.prepareManaged(before, draft))
     return files
   }
 
@@ -674,6 +889,17 @@ export class Notes {
       for (const variant of Object.values(item.otherLang ?? {})) strip(variant)
     }
     for (const item of durable.items) strip(item)
+    for (const style of durable.styles ?? []) if (style.content && !style.preset && !style.sample) {
+      for (const field of STYLE_TEXT) delete style[field]
+      delete style.sampleMaterial
+    }
+    for (const skill of durable.skills ?? []) if (skill.content && !skill.sample) {
+      for (const field of RULE_TEXT) delete skill[field]
+    }
+    if (durable.voice?.content) delete durable.voice.text
+    for (const item of durable.items) if (item.materialContent) {
+      for (const field of MATERIAL_TEXT) delete item[field]
+    }
     return durable
   }
 }
