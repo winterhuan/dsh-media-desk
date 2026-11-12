@@ -170,7 +170,7 @@ export function Toast() {
     <div key={toast.key} className={`md-toast ${toast.error ? 'is-error' : ''}`} role={toast.error ? 'alert' : 'status'}>
       {toast.undo ? <Icon name="check" size={14} /> : null}
       <span>{toast.text}</span>
-      {toast.undo ? <button type="button" onClick={undo}>{t('撤销')}</button> : null}
+      {toast.undo ? <button type="button" onClick={() => undo(toast.undoId)}>{t('撤销')}</button> : null}
     </div>
   )
 }

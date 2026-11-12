@@ -29,6 +29,11 @@ export async function nativeRuntime(t, options = {}) {
   const env = { ...process.env, DSH_HOME: home, DSH_AGENTS_HOME: agents, WIKI_PATH: wiki, ...options.env }
   let child, exited, stopping, cookie, baseUrl
   const connections = new Set()
+  /** Connections receive the stop signal first; surviving crash observers close after child exit. */
+  const trackConnection = close => {
+    connections.add(close)
+    return () => connections.delete(close)
+  }
   let log = ''
   const stop = (signal = 'SIGTERM') => {
     if (stopping) {
@@ -36,13 +41,18 @@ export async function nativeRuntime(t, options = {}) {
       return stopping
     }
     stopping = (async () => {
-      await Promise.all([...connections].map(close => close()))
+      await Promise.all([...connections].map(close => close(signal)))
       if (!child) return
       const current = child
       let timedOut = false
       current.kill(signal)
       const deadline = setTimeout(() => { timedOut = true; current.kill('SIGKILL') }, options.stopTimeoutMs ?? 8000)
-      try { return { ...await exited, timedOut } } finally {
+      try {
+        const result = await exited
+        clearTimeout(deadline)
+        await Promise.all([...connections].map(close => close()))
+        return { ...result, timedOut }
+      } finally {
         clearTimeout(deadline)
         child = undefined
       }
@@ -210,5 +220,5 @@ export async function nativeRuntime(t, options = {}) {
     }
     throw new Error('Native input did not reach a persisted turn end: ' + requestId + '\n' + log)
   }
-  return { root, wiki, home, agents, telemetryPath, dsh, start, stop, host, rpc, events, interactions, prompt, turn, get url() { return baseUrl }, get log() { return log } }
+  return { root, wiki, home, agents, telemetryPath, dsh, start, stop, trackConnection, host, rpc, events, interactions, prompt, turn, get url() { return baseUrl }, get log() { return log } }
 }

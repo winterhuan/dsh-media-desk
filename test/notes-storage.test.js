@@ -498,9 +498,13 @@ test('撤销删除重新读取保留的登记文件，缺失时保留撤销入�
   assert.equal(restored.status, 200, JSON.stringify(restored.value))
   const work = restored.value.state.items.find(row => row.id === id)
   assert.equal(work.body, 'The later external primary.\n')
-  assert.equal(work.content.revision, reference.revision + 1)
+  assert.ok(work.content.revision > pending.value.state.notesRevisions[id])
   assert.equal(await readFile(path, 'utf8'), external)
   assert.equal(restored.value.canUndo, false)
+  const stale = await runtime.host('ops', { expectedContent: { [id]: reference }, ops: [{ op: 'update_item', id, body: 'An obsolete deletion input.' }] })
+  assert.equal(stale.status, 409)
+  assert.equal(stale.value.code, 'notes/conflict')
+  assert.equal(await readFile(path, 'utf8'), external)
 })
 
 test('无效主文件拒绝成稿受理，不留下运行中的虚假任务', { timeout: 180000 }, async t => {

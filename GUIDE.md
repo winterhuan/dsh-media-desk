@@ -5,7 +5,9 @@
   </picture>
 </p>
 
-<h1 align="center">Media Desk</h1>
+# Media Desk
+
+English | [中文](GUIDE.zh.md)
 
 <p align="center"><b>A DeepSeek Harness plugin. Capture an idea, and one click drafts the script, cover, images and storyboard.</b></p>
 
@@ -57,6 +59,31 @@ It works with TikTok, Instagram, YouTube and X as well as Chinese platforms (Red
 </td>
 </tr>
 </table>
+
+<br>
+
+<a id="notes-recovery"></a>
+## Notes recovery
+
+Use this fork in a complete DSH `0.2.2-rc.1` Web profile; follow [the package installation instructions](README.md#use-this-package).
+
+The **Body** tile edits the current Markdown at `notes/works/<work-id>-<language>.md`. Its file name keeps the Work ID when you rename the title. The **Work language** selector switches between saved versions; fixed AI originals and earlier draft formats remain under `notes/history/<work-id>/`.
+
+To move existing work, open **Recover saves and migrate** in the workbench header and choose **Move legacy work to Notes**. Migration creates and verifies a private backup before publishing files. It preserves work identities, original source text, drafts, AI originals and saved languages. An unknown legacy language uses `und`; the interface language does not identify the author's language. Repeat migration returns the same completed receipt. An unrelated file at a target path must be retained and renamed or explicitly registered first.
+
+If saving fails, keep the editor text and open the recovery dialog. Repair the reported directory or permission problem, then choose **Retry saving** for the retained candidate. This reuses the saved content and its acceptance identity. It does not repeat a model or image request. A task-owned candidate cannot use the generic retry without its task validation; the dialog identifies this restriction.
+
+For **Version conflict**, choose **Review versions**, compare the current body with the retained external file, then select **Keep the current body** or **Use the retained external body** and apply the choice. Both versions and the candidate remain retained. Invalid external Markdown can be inspected, but must be repaired before adopting it. If the file changes again, refresh and review the new version. Editors with a retained old file handle can produce another conflict after the choice.
+
+Undo restores only the accepted edit and keeps later disjoint text or metadata changes. It targets that edit's saved language without changing your current language selection. Overlapping changes report a conflict and retain the undo record for repair. Undo does not restore old production execution or lower content revisions.
+
+For rollback, stop the selected DSH writer and use the built checkout. Set `DSH_HOME` and `WIKI_PATH` to that stopped profile's home and Wiki, and set `MEDIA_DESK_MIGRATION_ID` to the verified backup ID from the recovery dialog's backup path. Run:
+
+```sh
+node src/notes-rollback.js "$MEDIA_DESK_MIGRATION_ID"
+```
+
+The command verifies and restores the backed-up data, then reports the retained post-migration backup and live evidence paths. New Notes files, displaced editor bytes and native Session logs remain available. Use the old package with the restored pre-migration data before restarting; do not run an old package against the Notes reference format.
 
 <br>
 
@@ -288,11 +315,11 @@ Thanks to everyone who has contributed code:
 ## Development
 
 ```bash
-npm install && npm test        # host logic tests
-npm run watch                  # rebuild when client/ changes
-scripts/dev-sandbox.sh         # run the web version in an isolated DSH_HOME
-node scripts/mock-llm.mjs      # mock text and image models, no quota used
-npm pack                       # build the installable tgz
+npm install && npm test
+npm run watch
+scripts/dev-sandbox.sh
+node scripts/mock-llm.mjs
+npm pack
 ```
 
 `scripts/mock-monid.mjs` is a fake `monid` command that returns made-up content, so you can test the import flow for free. Wrap it as an executable named `monid` and put it first on your `PATH`.

@@ -6,9 +6,9 @@ import { lang, plural, setLanguagePreference, t } from './i18n.js'
 const BASE = 'media-desk/'
 
 let snapshot = {
-  state: null, model: null, modelOk: null, modelError: null, canUndo: false, error: null,
+  state: null, model: null, modelOk: null, modelError: null, canUndo: false, undoId: null, error: null,
   view: 'home', mode: 'scatter', focusId: null, sheetOrigin: null, dockOpen: true, studioDock: false, chatQuote: null, query: '', kindFilter: 'all', related: null,
-  live: {}, settings: null, settingsOpen: false, modelPickOpen: false, thinking: false, toast: null, capture: null, dialog: null,
+  live: {}, settings: null, settingsOpen: false, notesRecovery: false, modelPickOpen: false, thinking: false, toast: null, capture: null, dialog: null,
 }
 const listeners = new Set()
 
@@ -35,14 +35,14 @@ async function request(path, body) {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-media-desk-lang': lang() }, body: JSON.stringify(body),
   })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw Object.assign(new Error(data.error || t('请求失败（{status}）', { status: res.status })), { code: data.code })
+  if (!res.ok) throw Object.assign(new Error(data.error || t('请求失败（{status}）', { status: res.status })), { code: data.code, pendingId: data.pendingId })
   return data
 }
 
 let toastTimer = null
 export function toast(text, { undo = false, error = false } = {}) {
   clearTimeout(toastTimer)
-  setDesk({ toast: { text, undo, error, key: Date.now() } })
+  setDesk({ toast: { text, undo, undoId: snapshot.undoId, error, key: Date.now() } })
   toastTimer = setTimeout(() => setDesk({ toast: null }), undo || text.length > 24 ? 6000 : 3200)
 }
 
@@ -56,7 +56,7 @@ export async function loadDesk() {
     const settings = await request('settings')
     setLanguagePreference(settings.language)
     const data = await request('state')
-    setDesk({ settings, state: data.state, model: data.model, modelOk: data.modelOk, modelError: data.modelError, canUndo: data.canUndo, error: null })
+    setDesk({ settings, state: data.state, model: data.model, modelOk: data.modelOk, modelError: data.modelError, canUndo: data.canUndo, undoId: data.undoId, error: null })
   } catch (err) {
     setDesk({ error: err.message })
   }
@@ -79,7 +79,7 @@ export async function dispatchOps(ops, { label = t('操作'), undoable = true, s
       return content ? [[op.id, { revision: content.revision, sha256: content.sha256 }]] : []
     }))
     const data = await request('ops', { ops, label, undoable, expectedContent: versions })
-    setDesk({ state: data.state, canUndo: undoable || snapshot.canUndo })
+    setDesk({ state: data.state, canUndo: data.canUndo, undoId: data.undoId })
     if (data.errors?.length && throwOnError) throw new Error(data.errors[0])
     if (data.errors?.length) toast(data.errors[0], { error: true })
     else if (!silent && data.receipts?.[0]) toast(data.receipts[0].text, { undo: undoable })
@@ -105,14 +105,70 @@ export async function relinkWorkFile(id, relativePath) {
   toast(t('作品文件已重新关联'))
 }
 
-export async function undo() {
+export async function undo(id = snapshot.undoId) {
+  if (!id) return
   try {
-    const data = await request('undo', {})
-    setDesk({ state: data.state, canUndo: data.canUndo, toast: null })
+    const data = await request('undo', { id })
+    setDesk({ state: data.state, canUndo: data.canUndo, undoId: data.undoId, toast: null })
     if (data.label) toast(t('已撤销：{label}', { label: data.label }))
   } catch (err) {
     report(err)
   }
+}
+
+/** @returns {Promise<object[]>} Retained saves, conflicts and accepted receipts. */
+export async function savedNotesWrites() { return (await request('notes/saves')).writes }
+
+/** @returns {Promise<object[]>} Verified migration metadata without settings or file contents. */
+export async function notesMigrationBackups() { return (await request('notes/migrations')).migrations }
+
+/**
+ * Inspect only the selected save's observed version before resolving it.
+ * @param {object} version - Save/work identity, retained path and observed hash.
+ * @returns {Promise<object>} Current body and retained bytes with their validation status.
+ */
+export function readSavedNotesVersion(version) { return request('notes/version', version) }
+
+function installNotesState(data) {
+  setDesk({ state: data.state, canUndo: Boolean(data.state.notesUndo?.length), undoId: data.state.notesUndo?.at(-1)?.id ?? null })
+}
+
+/**
+ * Retry existing files without starting generation.
+ * @param {string} id - Retained save identity.
+ * @returns {Promise<void>} Resolves after the durable receipt and state return.
+ */
+export async function retryNotesSave(id) {
+  installNotesState(await request('notes/retry', { id }))
+  toast(t('已保存保留的候选'))
+}
+
+/**
+ * Select a reviewed external or current body while retaining both versions.
+ * @param {object} version - Observed save/work/path/hash and current or external choice.
+ * @returns {Promise<void>} Resolves after the selection is accepted.
+ */
+export async function resolveNotesVersion(version) {
+  installNotesState(await request('notes/resolve', version))
+  toast(t('正文版本已选择，其他版本仍保留'))
+}
+
+/** @returns {Promise<void>} Verified backup and legacy work/language migration complete. */
+export async function migrateLegacyNotes() {
+  installNotesState(await request('notes/migrate', {}))
+  toast(t('旧作品和各语言版本已迁移到 Notes'))
+}
+
+/**
+ * Select an existing language using the current content identity.
+ * @param {string} id - Work identity.
+ * @param {string} language - Saved language to select.
+ * @param {object} expectedContent - Version observed before selection.
+ * @returns {Promise<void>} Resolves after the new selection and monotonic version return.
+ */
+export async function selectWorkLanguage(id, language, expectedContent) {
+  installNotesState(await request('notes/language', { id, language, expectedContent }))
+  toast(t('作品语言已切换'))
 }
 
 export function openItem(id, origin = null) {
@@ -250,7 +306,8 @@ export async function sendChat(text) {
   }))
   try {
     const data = await request('chat', { message, focusId: focusId ?? undefined })
-    setDesk({ state: data.state, canUndo: true, modelOk: data.modelOk, modelError: data.modelError })
+    installNotesState(data)
+    setDesk({ modelOk: data.modelOk, modelError: data.modelError })
     runActions(data.actions || [])
   } catch (err) {
     report(err)
@@ -293,7 +350,7 @@ export async function clearChat() {
 export async function captureUrl(url, extra = {}) {
   try {
     const data = await request('capture-url', { url, ...extra })
-    setDesk({ state: data.state, canUndo: true })
+    installNotesState(data)
     toast(t('已收藏到灵感墙'), { undo: true })
     return data.id
   } catch (err) {
@@ -325,7 +382,7 @@ export async function captureFiles(files) {
 export async function refreshAccount(payload) {
   try {
     const data = await request('account/refresh', payload)
-    setDesk({ state: data.state, canUndo: true })
+    installNotesState(data)
     if (data.fetchError) toast(t('读取主页失败：{error}', { error: data.fetchError }), { error: true })
     else toast(t('已更新账号档案'))
     return data
@@ -338,7 +395,7 @@ export async function refreshAccount(payload) {
 export async function extractStyle(payload) {
   try {
     const data = await request('style/extract', payload)
-    setDesk({ state: data.state, canUndo: true })
+    installNotesState(data)
     const missed = data.failures?.length ?? 0
     toast(missed ? t(plural(missed, '风格提炼好了，有 1 个链接没抓到', '风格提炼好了，有 {n} 个链接没抓到'), { n: missed }) : t('风格提炼好了，之后就按它写'), { undo: true })
     return true
@@ -359,7 +416,7 @@ export async function monidStatus() {
 export async function importAccount(payload) {
   try {
     const data = await request('monid/import', payload)
-    setDesk({ state: data.state, canUndo: true })
+    installNotesState(data)
     const spent = data.cost ? t('，花费 ${cost}', { cost: data.cost.toFixed(3) }) : ''
     const what = t(plural(data.count, '读到 {name} 的 1 条内容，新增 {added} 条', '读到 {name} 的 {count} 条内容，新增 {added} 条'), { name: data.nickname, count: data.count, added: data.added })
     toast(data.styleError ? t('{what}{spent}。风格没提炼成：{error}', { what, spent, error: data.styleError }) : t('{what}，已提炼成风格{spent}', { what, spent }), { error: Boolean(data.styleError), undo: !data.styleError })
@@ -373,7 +430,7 @@ export async function importAccount(payload) {
 export async function learnSkills() {
   try {
     const data = await request('skills/learn', {})
-    setDesk({ state: data.state, canUndo: true })
+    installNotesState(data)
     toast(data.added ? t(plural(data.added, '从数据里提炼出 1 条新规则，等你确认', '从数据里提炼出 {n} 条新规则，等你确认'), { n: data.added }) : t('目前的数据还提炼不出新规则'))
   } catch (err) {
     report(err)

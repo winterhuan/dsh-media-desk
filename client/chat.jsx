@@ -32,7 +32,7 @@ function Message({ message, canUndoThis }) {
       {message.notice ? <p className="md-msg-note">{message.notice}</p> : null}
       <footer>
         <span>{message.engine === 'local' ? t('本地规则') : ''}</span>
-        {canUndoThis ? <button type="button" onClick={undo}><Icon name="undo" size={12} />{t('撤销')}</button> : null}
+        {canUndoThis ? <button type="button" onClick={() => undo(message.undoId)}><Icon name="undo" size={12} />{t('撤销')}</button> : null}
       </footer>
     </div>
   )
@@ -41,6 +41,7 @@ function Message({ message, canUndoThis }) {
 /** 对话面板：首页的助手和成稿工作区共用。每条灵感有自己的对话。 */
 export function ChatPanel({ itemId, head, top = null, suggestions, placeholder, disabled = false, intro = true }) {
   const all = useDesk(s => s.state.chat)
+  const undoEntries = useDesk(s => s.state.notesUndo)
   const chat = React.useMemo(() => all.filter(m => (m.itemId ?? null) === (itemId ?? null)), [all, itemId])
   const thinking = useDesk(s => s.thinking)
   const quote = useDesk(s => s.chatQuote)
@@ -79,7 +80,7 @@ export function ChatPanel({ itemId, head, top = null, suggestions, placeholder, 
             <h3>{t('说一句话，')}<br />{t('剩下的我来补全。')}</h3>
             <p>{t('选题、灵感、内容、排期、风格和写作标准，都可以直接说。每一步都能撤销。')}</p>
           </div>
-        ) : chat.map(message => <Message key={message.id} message={message} canUndoThis={message === lastBot && message.undoable} />)}
+        ) : chat.map(message => <Message key={message.id} message={message} canUndoThis={message === lastBot && message.undoable && undoEntries?.some(entry => entry.id === message.undoId)} />)}
         {thinking ? <div className="md-msg is-bot"><span className="md-shimmer">{t('正在处理……')}</span></div> : null}
       </div>
       {suggestions?.length ? (

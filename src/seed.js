@@ -238,6 +238,17 @@ function textTables(lang) {
 
 const TABLES = { zh: textTables('zh'), en: textTables('en') }
 
+/**
+ * Return the packaged example for one explicit language; it does not infer an author's language.
+ * @param {string} id - Stable built-in sample identity.
+ * @param {'zh'|'en'} language - Requested packaged example language.
+ * @returns {object|null} Detached sample text fields, or null for an unknown sample.
+ */
+export function sampleText(id, language) {
+  const text = TABLES[language]?.items[id]
+  return text ? { ...structuredClone(text), language, drafts: {} } : null
+}
+
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 
 /** 字段还是某种语言的原文时才换成目标语言，用户改过的不动。返回是否改了。 */

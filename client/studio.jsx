@@ -2,7 +2,7 @@
 import React from 'react'
 import { ChatPanel } from './chat.jsx'
 import { downloadCover } from './cover.js'
-import { cancelProduce, closeItem, dispatchOps, readWork, regenAsset, registerWorkFile, relinkWorkFile, revealSaved, runProduce, saveProduced, setDesk, toast, useDesk, watchProduction } from './desk.js'
+import { cancelProduce, closeItem, dispatchOps, readWork, regenAsset, registerWorkFile, relinkWorkFile, revealSaved, runProduce, saveProduced, selectWorkLanguage, setDesk, toast, useDesk, watchProduction } from './desk.js'
 import { plural, t } from './i18n.js'
 import { NativeSessionButton } from './native-session.jsx'
 import { Icon, IconButton } from './ui.jsx'
@@ -358,9 +358,22 @@ function ArticleTile({ item, live, open, onToggle, onView, tileRef }) {
           </>
         ) : null}
       </header>
-      {content ? <div className="md-note-reference"><span title={content.notesRoot}>{content.relativePath}</span><span>{t('版本 {n}', { n: content.revision })}</span></div> : null}
-      {content && !ready ? <div className="md-note-status" role="alert"><p className="md-setup-note is-error">{content.error}</p><button type="button" className="md-link-btn" onClick={fileDialog}>{t('重新关联作品文件')}</button></div> : null}
-      {saveError || changed ? <div className="md-note-status" role="alert"><p className="md-setup-note is-error">{saveError || t('作品已有新版本，当前修改仍保留。请取消修改并重新读取')}</p></div> : null}
+      {content ? <div className="md-note-reference"><span title={content.notesRoot}>{content.relativePath}</span><span>{t('版本 {n}', { n: content.revision })}</span>
+        {Object.values(item.otherLang ?? {}).some(variant => variant.content) ? <select aria-label={t('作品语言')} value={content.language} disabled={saving || Boolean(editor) || running || !ready} onChange={async event => {
+          setSaving(true)
+          try { await selectWorkLanguage(item.id, event.target.value, content) } catch (error) { toast(error.message, { error: true }) }
+          finally { setSaving(false) }
+        }}>
+          {[content.language, ...Object.keys(item.otherLang ?? {}).filter(language => item.otherLang[language].content)].map(language => <option key={language} value={language}>{t(language === 'zh' ? '中文' : language === 'en' ? '英文' : '未知语言（und）')}</option>)}
+        </select> : null}
+      </div> : null}
+      {content && !ready ? <div className="md-note-status" role="alert"><p className="md-setup-note is-error">{content.error}</p>
+        {['pending', 'conflict'].includes(content.status) ? <button type="button" className="md-link-btn" onClick={() => setDesk({ notesRecovery: true })}>{t('核对保留版本或重试保存')}</button>
+          : <button type="button" className="md-link-btn" onClick={fileDialog}>{t('重新关联作品文件')}</button>}
+      </div> : null}
+      {saveError || changed ? <div className="md-note-status" role="alert"><p className="md-setup-note is-error">{saveError || t('作品已有新版本，当前修改仍保留。请取消修改并重新读取')}</p>
+        {saveError ? <button type="button" className="md-link-btn" onClick={() => setDesk({ notesRecovery: true })}>{t('核对保留版本或重试保存')}</button> : null}
+      </div> : null}
       {streaming && content ? <p className="md-note-status md-muted">{t('生成预览，尚未保存')}</p> : null}
       {editor ? (
         <textarea className="md-article-edit" aria-label={content ? t('正文') : t('脚本')} value={editor.text} disabled={saving} onChange={e => setEditor(current => ({ ...current, text: e.target.value }))} />

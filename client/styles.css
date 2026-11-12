@@ -408,6 +408,7 @@ button.md-stamp:not(:disabled):hover { transform: scale(1.08) rotate(-2deg); }
 .md-note-reference { display: flex; flex: none; gap: 8px; padding: 0 18px 12px; color: var(--ink2); font-size: 12px; line-height: 18px; }
 .md-note-reference span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .md-note-reference span:last-child { flex: none; }
+.md-note-reference select { max-width: 130px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--card); color: var(--ink); font: inherit; }
 .md-note-status { flex: none; padding: 0 18px 12px; overflow-wrap: anywhere; font-size: 12.5px; line-height: 18px; }
 .md-note-status .md-setup-note { margin-bottom: 6px; }
 .md-skeleton { display: flex; flex-direction: column; gap: 12px; padding: 6px 20px 16px 18px; }
@@ -582,6 +583,15 @@ button.md-receipt:hover { transform: translateX(2px); }
 .md-root .md-field input:focus, .md-root .md-field select:focus, .md-root .md-field textarea:focus { border-color: var(--ink); }
 .md-form-foot { display: flex; gap: 6px; margin-top: 4px; }
 .md-form-error, .md-form .md-muted { overflow-wrap: anywhere; }
+.md-retained-save { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-lg); overflow-wrap: anywhere; }
+.md-retained-save b { font-weight: 500; }
+.md-retained-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.md-retained-conflict > span { flex: 1; min-width: 140px; overflow-wrap: anywhere; }
+.md-migration-backups { color: var(--ink2); overflow-wrap: anywhere; font-size: 12px; line-height: 18px; }
+.md-migration-backups p { margin-top: 8px; }
+.md-notes-loading { display: flex; justify-content: center; padding: 20px; }
+.md-notes-loading svg { animation: md-notes-spin 1s linear infinite; }
+@keyframes md-notes-spin { to { transform: rotate(360deg); } }
 .md-capture-tabs { display: flex; gap: 2px; padding: 4px; margin-bottom: 14px; border-radius: var(--r-md); background: var(--hover); }
 .md-capture-tabs button { flex: 1; height: 28px; border-radius: var(--r-sm); text-align: center; color: var(--ink3); font-size: 12.5px; }
 .md-capture-tabs button.is-on { background: var(--card); color: var(--ink); box-shadow: var(--dsw-elevation-soft); }

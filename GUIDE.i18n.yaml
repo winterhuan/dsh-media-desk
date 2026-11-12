@@ -1,0 +1,61 @@
+# Bilingual-pair consistency record for GUIDE.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write GUIDE.md
+/:
+  en: 1e27c3a2e17b5f89
+  zh: afd3986e5000a838
+/media-desk:
+  en: a079256fcf0a2a7b
+  zh: a8f9297c1b9f9a63
+/media-desk/what-it-is:
+  en: c353c979e4613cfe
+  zh: d196a611a1aa8349
+/media-desk/draft-it-in-one-click:
+  en: dc684b4300d98e42
+  zh: a16d220e80edce07
+/media-desk/notes-recovery:
+  en: 5a1ee1757cc55993
+  zh: 0c4e392f73815040
+/media-desk/the-idea-wall:
+  en: 40622d49a5bc3f3f
+  zh: 5f96218042af2a68
+/media-desk/schedule:
+  en: 1b0c8fa471b8f807
+  zh: e70fd5403d30f215
+/media-desk/insights:
+  en: 883fde682ce36e08
+  zh: 2c43c325820e4e14
+/media-desk/styles:
+  en: 20651b6fad27f7c7
+  zh: 80a69079501d361b
+/media-desk/get-started:
+  en: d548c8c5d572d3be
+  zh: 6f93a6c01d310c42
+/media-desk/what-it-costs:
+  en: 8da769963a5e7833
+  zh: 17c989e07b5266d3
+/media-desk/what-it-costs/use-dsh-generation-tools:
+  en: 1c5201b50794a322
+  zh: f0f8bb187887acd0
+/media-desk/import-your-own-account:
+  en: 70ff3bb7c0644e23
+  zh: 4bb8b568ea647d95
+/media-desk/faq:
+  en: 1fc0bf90e4c1948c
+  zh: 3f4f5efaef7cb220
+/media-desk/about-the-author:
+  en: 48739bd72d83965f
+  zh: 294278b7b4390c06
+/media-desk/thanks:
+  en: c74604c3866fa332
+  zh: d09952d1a0ae9a69
+/media-desk/thanks/special-thanks:
+  en: 636c22a4cb2b98c0
+  zh: c88b4d88e526dc60
+/media-desk/thanks/contributors:
+  en: ee3f22d98e6acd94
+  zh: 9a2ac0bc015cdd63
+/media-desk/development:
+  en: 8d649870995684bc
+  zh: c10d90b0b6213cef

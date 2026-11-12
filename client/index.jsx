@@ -9,6 +9,7 @@ import { StyleView } from './style.jsx'
 import { ScheduleView } from './schedule.jsx'
 import { ModelButton, ModelPicker } from './modelpick.jsx'
 import { NativeSessionButton } from './native-session.jsx'
+import { NotesRecoveryDialog } from './notes.jsx'
 import { SettingsDialog } from './settings.jsx'
 import { Studio } from './studio.jsx'
 import css from './styles.css'
@@ -164,7 +165,8 @@ function Desk({ openSession }) {
           </nav>
           <span style={{ flex: 1 }} />
           {ready ? <SampleBadge /> : null}
-          {canUndo ? <IconButton icon="undo" label={t('撤销上一步')} onClick={undo} /> : null}
+          {canUndo ? <IconButton icon="undo" label={t('撤销上一步')} onClick={() => undo()} /> : null}
+          {ready ? <IconButton icon="save" label={t('恢复保存与迁移')} onClick={() => setDesk({ notesRecovery: true })} /> : null}
           {ready ? <NativeSessionButton openSession={openSession} /> : null}
           {ready ? <ModelButton /> : null}
           <IconButton icon="gear" label={t('设置')} onClick={() => setDesk({ settingsOpen: true })} />
@@ -180,6 +182,7 @@ function Desk({ openSession }) {
       {ready && showDock ? <ChatDock /> : null}
       {ready ? <CaptureDialog /> : null}
       <FormDialog />
+      {ready ? <NotesRecoveryDialog /> : null}
       {ready ? <SettingsDialog /> : null}
       {ready ? <ModelPicker /> : null}
       <Toast />

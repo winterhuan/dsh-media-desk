@@ -1,5 +1,5 @@
 /** Cooperative local Hosts hold canonical data and Notes directory locks for their write lifetime. */
-import { mkdir, readFile, realpath, stat } from 'node:fs/promises'
+import { mkdir, readFile, readdir, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
 import { tr } from './i18n.js'
@@ -67,21 +67,38 @@ export class WriteOwner {
       if (typeof root !== 'string' || !isAbsolute(root)) throw new Error('Saved Notes root must be an absolute directory')
       roots.add(root)
     }
+    const references = value => {
+      if (!value || typeof value !== 'object') return
+      if (value.notesRoot !== undefined) add(value.notesRoot)
+      for (const child of Object.values(value)) if (child && typeof child === 'object') references(child)
+    }
     for (const name of ['state.json', 'sessions.json']) {
       let saved
       try { saved = JSON.parse(await readFile(join(this.dataRoot, name), 'utf8')) } catch (error) {
         if (error.code === 'ENOENT') continue
         throw error
       }
-      if (saved.version !== 1) throw new Error(`Unsupported Media Desk metadata in ${name}`)
+      if (saved.version !== 1 && !(name === 'state.json' && saved.version === 2)) throw new Error(`Unsupported Media Desk metadata in ${name}`)
       if (name === 'state.json') {
         if (!Array.isArray(saved.items)) throw new Error('Saved work list is invalid')
-        if (saved.notesRoot !== undefined) add(saved.notesRoot)
-        for (const item of saved.items) if (item.content) add(item.content.notesRoot)
+        references(saved)
       } else {
         if (!Array.isArray(saved.associations)) throw new Error('Saved Session associations are invalid')
         for (const association of saved.associations) add(association.notesRoot ?? join(association.wikiRoot, 'notes'))
       }
+    }
+    let pending
+    try { pending = await readdir(join(this.dataRoot, 'notes-writes')) } catch (error) { if (error.code !== 'ENOENT') throw error }
+    for (const id of pending ?? []) {
+      if (!/^[a-f0-9-]{36}$/.test(id)) continue
+      let bytes
+      try { bytes = await readFile(join(this.dataRoot, 'notes-writes', id, 'proposal.json'), 'utf8') } catch (error) {
+        if (error.code === 'ENOENT' && !(await readdir(join(this.dataRoot, 'notes-writes', id))).length) continue
+        throw error
+      }
+      const saved = JSON.parse(bytes)
+      if (saved.version !== 1 || saved.id !== id || !Array.isArray(saved.files)) throw new Error('Saved Notes publication metadata is invalid')
+      references(saved)
     }
     return roots
   }

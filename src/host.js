@@ -5,6 +5,7 @@ import { stat, writeFile } from 'node:fs/promises'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { pipeline } from 'node:stream/promises'
 import { Service } from '@deepseek-ai/cordis'
 import { assistantModelOverride, callModel, chatPrompts, defaultSelection, extractJson, modelInfo, modelStatus, setAssistantModel } from './ai.js'
@@ -21,9 +22,9 @@ import { publicSettings, Settings, imageReady } from './settings.js'
 import { normalizeStyle, stylePrompts } from './style.js'
 import { dshHome, Store } from './store.js'
 import { currentLang, platformName, tr, withLang } from './i18n.js'
-import { localizeSamples, samplesNeedLocale } from './seed.js'
+import { samplesNeedLocale } from './seed.js'
 import { NativeSessions } from './native-sessions.js'
-import { Notes } from './notes.js'
+import { Notes, notesSaveMessage } from './notes.js'
 import { WriteOwner } from './write-owner.js'
 
 const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets')
@@ -31,13 +32,18 @@ const MAX_JSON = 4_000_000
 const MAX_UPLOAD = 250_000_000
 const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' }
 const UPLOAD_EXT = Object.fromEntries(Object.entries(MIME).filter(([ext]) => ext !== '.jpeg').map(([ext, type]) => [type, ext]))
-const SERIAL_ROUTES = new Set(['ops', 'undo', 'settings', 'upload', 'produce', 'produce/cancel', 'produce/regen', 'produce/save', 'skills/export', 'notes/register', 'notes/relink', 'chat/clear', 'sessions/open', 'sessions', 'state', 'production'])
+const SERIAL_ROUTES = new Set(['ops', 'undo', 'settings', 'upload', 'produce', 'produce/cancel', 'produce/regen', 'produce/save', 'skills/export', 'notes/register', 'notes/relink', 'notes/retry', 'notes/resolve', 'notes/version', 'notes/saves', 'notes/migrate', 'notes/migrations', 'notes/language', 'chat/clear', 'sessions/open', 'sessions', 'state', 'production'])
 
 function json(res, status, body) {
   res.statusCode = status
   res.setHeader('content-type', 'application/json; charset=utf-8')
   res.setHeader('cache-control', 'no-store')
   res.end(JSON.stringify(body))
+}
+
+async function jsonState(res, store, result) {
+  const state = await store.read()
+  return json(res, 200, { ...result, state, canUndo: store.canUndo, undoId: store.undoId })
 }
 
 async function readBuffer(req, limit) {
@@ -159,17 +165,18 @@ async function chatTurn(ctx, store, desk, body) {
       targets = canDraw ? revision.targets : []
     }
     return { receipts, errors, targets, done: Boolean(production) }
-  }, { expectedContent })
+  }, { expectedContent, resultKey: newId('chat'), payloadHash: createHash('sha256').update(JSON.stringify({ message, focusId, plan, expectedContent })).digest('hex') })
   const result = await store.mutate('对话记录', (draft) => {
     const { receipts, errors, targets, done } = changed
     const at = new Date().toISOString()
     const itemId = focusId ?? undefined
+    const undoId = draft.notesUndo?.find(entry => entry.id === changed.acceptance.id)?.id ?? null
     // 已经做好的成稿不会因为一句话被整篇重做，要重做请点「重新成稿」
     const actions = (Array.isArray(plan.actions) ? plan.actions : [])
       .filter(a => a && ['produce', 'open', 'nav'].includes(a.type))
       .filter(a => !(a.type === 'produce' && (done && a.id === focusId || draft.items.find(row => row.id === a.id)?.production?.status === 'done')))
     draft.chat.push({ id: newId('c'), at, role: 'user', text: message, itemId })
-    const answer = { id: newId('c'), at, role: 'assistant', text: plan.reply, receipts, errors, engine, notice, undoable: receipts.length > 0, itemId }
+    const answer = { id: newId('c'), at, role: 'assistant', text: plan.reply, receipts, errors, engine, notice, undoable: Boolean(undoId), undoId, itemId }
     draft.chat.push(answer)
     draft.chat = draft.chat.slice(-300)
     return { answer, actions, targets, state: draft, modelOk: modelStatus.ok, modelError: modelStatus.error }
@@ -313,13 +320,15 @@ async function route(ctx, store, desk, req, res) {
     return sendFile(req, res, join(store.filesDir, name), desk.ownership.signal)
   }
   if (method === 'GET') {
+    if (path === 'notes/migrations') return json(res, 200, { migrations: await store.migration.list() })
+    if (path === 'notes/saves') return json(res, 200, { writes: await store.saves() })
     if (path === 'sessions') return json(res, 200, { associations: await desk.nativeSessions.list() })
     if (path === 'state') {
       if (!desk.settled) { desk.settled = true; await desk.producer.settleAll().catch(() => {}) }
       let state = await store.read()
       // 示例数据跟着界面语言走；用户自己的内容不动
-      if (samplesNeedLocale(state, currentLang())) state = await store.mutate('', draft => (localizeSamples(draft, currentLang()), draft), { undoable: false })
-      return json(res, 200, { state, model: engineLabel(ctx), modelOk: modelStatus.ok, modelError: modelStatus.error, canUndo: store.undo.length > 0 })
+      if (samplesNeedLocale(state, currentLang())) state = await store.localizeNotes(currentLang(), await desk.nativeSessions.list())
+      return json(res, 200, { state, model: engineLabel(ctx), modelOk: modelStatus.ok, modelError: modelStatus.error, canUndo: store.canUndo, undoId: store.undoId })
     }
     if (path === 'production') {
       const id = url.searchParams.get('id') ?? ''
@@ -356,15 +365,21 @@ async function route(ctx, store, desk, req, res) {
   if (path === 'upload') return handleUpload(req, store, res)
   const body = await readJson(req)
   switch (path) {
-    case 'notes/register': {
-      const result = await store.mutate(tr('登记作品文件'), async draft => {
+    case 'notes/migrate': return json(res, 200, await store.migrateNotes(await desk.nativeSessions.list()))
+    case 'notes/language': {
+      const result = await store.mutate(tr('切换作品语言'), async draft => {
         const item = draft.items.find(row => row.id === body.id)
-        if (!item) throw Object.assign(new Error(tr('作品不存在：{id}', { id: body.id })), { status: 404 })
-        const saved = desk.nativeSessions.associations.find(row => row.workId === item.id)
-        await store.notes.register(item, body.language, body.relativePath, saved?.notesRoot ?? store.notes.root, saved?.wikiRoot ?? store.notes.wikiRoot)
+        if (!item?.content) throw Object.assign(new Error(tr('作品尚未登记 Notes 文件')), { code: 'notes/not-registered', status: 409 })
+        await store.notes.switchLanguage(item, body.language)
         return { state: draft }
-      }, { undoable: false })
+      }, { undoable: false, expectedContent: { [body.id]: body.expectedContent } })
       return json(res, 200, result)
+    }
+    case 'notes/version': return json(res, 200, await store.savedVersion(body))
+    case 'notes/resolve': return json(res, 200, await store.resolveSave(body))
+    case 'notes/retry': return json(res, 200, await store.retrySave(body.id))
+    case 'notes/register': {
+      return json(res, 200, await store.registerNotes(body, await desk.nativeSessions.list()))
     }
     case 'notes/relink': {
       const result = await store.mutate(tr('重新关联作品文件'), async draft => {
@@ -382,14 +397,15 @@ async function route(ctx, store, desk, req, res) {
       const result = await store.mutate(label, (draft) => {
         const applied = applyOps(draft, body.ops)
         return { ...applied, state: draft }
-      }, { undoable: body.undoable !== false, expectedContent: body.expectedContent ?? {} })
-      return json(res, 200, result)
+      }, { undoable: body.undoable !== false, expectedContent: body.expectedContent ?? {}, resultKey: body.resultKey,
+        payloadHash: createHash('sha256').update(JSON.stringify({ ops: body.ops, expectedContent: body.expectedContent ?? {} })).digest('hex') })
+      return json(res, 200, { ...result, canUndo: store.canUndo, undoId: store.undoId })
     }
     case 'undo': {
-      const label = await store.undoLast()
-      return json(res, 200, { label, state: await store.read(), canUndo: store.undo.length > 0 })
+      const label = await store.undoLast(body.id)
+      return json(res, 200, { label, state: await store.read(), canUndo: store.canUndo, undoId: store.undoId })
     }
-    case 'chat': return json(res, 200, await chatTurn(ctx, store, desk, body))
+    case 'chat': return jsonState(res, store, await chatTurn(ctx, store, desk, body))
     case 'chat/clear': {
       const state = await store.mutate('清空对话', (draft) => { draft.chat = []; return draft }, { undoable: false })
       return json(res, 200, { state })
@@ -434,8 +450,8 @@ async function route(ctx, store, desk, req, res) {
       execFile(command, [path], () => {})
       return json(res, 200, { path })
     }
-    case 'style/extract': return json(res, 200, await extractStyle(ctx, store, body, desk.ownership.signal))
-    case 'monid/import': return json(res, 200, await importAccountRoute(ctx, store, desk, body))
+    case 'style/extract': return jsonState(res, store, await extractStyle(ctx, store, body, desk.ownership.signal))
+    case 'monid/import': return jsonState(res, store, await importAccountRoute(ctx, store, desk, body))
     case 'settings': {
       const before = modelInfo(ctx)
       const updated = await desk.settings.update(body)
@@ -455,11 +471,11 @@ async function route(ctx, store, desk, req, res) {
       await store.run(() => writeFile(join(store.filesDir, name), buffer))
       return json(res, 200, { src: `media-desk/files/${name}` })
     }
-    case 'capture-url': return json(res, 200, await addFromUrl(ctx, store, body, desk.ownership.signal))
-    case 'account/refresh': return json(res, 200, await refreshAccount(store, body, desk.ownership.signal))
+    case 'capture-url': return jsonState(res, store, await addFromUrl(ctx, store, body, desk.ownership.signal))
+    case 'account/refresh': return jsonState(res, store, await refreshAccount(store, body, desk.ownership.signal))
     case 'skills/learn': {
       const proposals = proposeRules(await store.read())
-      if (!proposals.length) return json(res, 200, { added: 0, state: await store.read() })
+      if (!proposals.length) return jsonState(res, store, { added: 0 })
       const state = await store.mutate(tr('从数据中学习'), (draft) => {
         // 只用示例数据算出来的建议也算示例，清空示例时一起清掉，也不会被导出
         const fromSamples = !draft.metrics.some(metric => !metric.sample)
@@ -467,7 +483,7 @@ async function route(ctx, store, desk, req, res) {
         if (fromSamples) for (const receipt of receipts) { const skill = draft.skills.find(row => row.id === receipt?.target); if (skill) skill.sample = true }
         return draft
       })
-      return json(res, 200, { added: proposals.length, state })
+      return jsonState(res, store, { added: proposals.length, state })
     }
     case 'skills/export': {
       const state = await store.read()
@@ -569,7 +585,8 @@ export default class MediaDeskHost extends Service {
             res.end()
             return
           }
-          json(res, err.status || 500, { error: err.message, ...(err.code ? { code: err.code } : {}) })
+          const message = err.pendingId ? withLang(req.headers['x-media-desk-lang'], () => notesSaveMessage(err)) : err.message
+          json(res, err.status || 500, { error: message, ...(err.code ? { code: err.code } : {}), ...(err.pendingId ? { pendingId: err.pendingId } : {}) })
         }
       },
     }), 'dsh-media-desk: /media-desk routes')

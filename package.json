@@ -75,6 +75,7 @@
     "@deepseek-ai/dsh-tool-pwsh": "0.2.2-rc.1",
     "@deepseek-ai/dsh-tool-skill": "0.2.2-rc.1",
     "@deepseek-ai/dsh-tool-web": "0.2.2-rc.1",
+    "node-diff3": "3.2.1",
     "yaml": "2.9.1"
   },
   "files": [

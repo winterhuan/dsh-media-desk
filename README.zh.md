@@ -65,9 +65,11 @@ sources: []
 Editable Markdown body.
 ```
 
-只有明确登记的文件才成为工作台管理的作品。`notes/index.md` 接收此数据目录的导航块，保留无关正文、链接和笔记。修改标题不重命名文件。读取、编辑和模型文字接受前都会核对外部字节变化，即使 mtime 未变。打开的作品自动刷新。过期保存保留编辑框中的草稿；「取消修改并重新读取」返回最新文件。文件缺失、改名或无效时显示修复状态。「重新关联作品文件」只接受已拥有 Notes 的 `works` 目录中的普通文件，且作品身份和语言须相同；不会重建正文。
+只有已登记的作品文件才由工作台管理。`notes/index.md` 接收此数据目录的导航块，保留无关正文、链接和笔记。修改标题不重命名文件。读取、编辑和模型文字接受前都会核对外部字节变化，即使 mtime 未变。打开的作品自动刷新。过期保存保留编辑框中的草稿；「取消修改并重新读取」返回最新文件。文件缺失、改名或无效时显示修复状态。「重新关联作品文件」只接受已拥有 Notes 的 `works` 目录中的普通文件，且作品身份和语言须相同；不会重建正文。
 
 每个 Host 在初始化 Store、Settings 或 Notes 前，协作锁定规范化的数据目录及所有已保存或选中的 Notes 根目录。共享任一目录的另一个 Host 保持不可用且不初始化内容，其他插件仍可使用。正常停用插件时，先取消所属工作，等待写入和外部清理完成，再释放所有权。使用此布局前须停止旧版本，它们不参与这些锁。
+
+点击工作台顶部的「恢复保存与迁移」，在备份验证后将旧作品及各语言版本迁入 Notes。「作品语言」选择器在保留的版本之间切换。保存失败会保留候选；重试返回原接受回执，不重新生成。冲突核对可保留当前正文或采用保留的外部版本。撤销还原所属编辑并保留后来的不重叠修改。迁移、修复和离线回滚见 [Notes 恢复](GUIDE.md#notes-recovery)（[中文](GUIDE.zh.md#notes-recovery)）。
 
 <a id="development"></a>
 ## 开发
@@ -85,7 +87,7 @@ pnpm test
 
 [原生运行时 fixture](test/fixtures/native-runtime.js)安装隔离的官方 Web profile，在临时 Wiki 上运行真实的 Loader、SessionController 和工具。模型适配器仅控制外部模型响应。[技能指令记录](test/fixtures/llm-wiki.instructions.json)标识固定的 `llm-wiki` 指令文件；不包含个人 Wiki 页面。
 
-[Notes 存储测试](test/notes-storage.test.js)覆盖公开读取、编辑、登记、修复、成稿和已保存根目录绑定。[所有权测试](test/write-ownership.test.js)使用独立进程和暂停的公开 Store 操作，检查竞争、写入排空及被终止持有者的恢复。
+[Notes 存储测试](test/notes-storage.test.js)覆盖公开读取、编辑、登记、修复和已保存根目录绑定。[恢复](test/notes-recovery.test.js)、[撤销](test/notes-undo.test.js)和[迁移](test/notes-migration.test.js)通过公开 Host 检查保留的文件与回执。[所有权测试](test/write-ownership.test.js)使用独立进程和暂停的公开 Store 操作，检查竞争、写入排空及被终止持有者的恢复。
 
 <a id="understand-the-implementation"></a>
 ## 理解实现
@@ -94,6 +96,8 @@ pnpm test
 <summary>实现细节 — 点击展开</summary>
 
 [组合补丁](cordis.patch.yml)激活包的 Host 和专用创作 preset。[Host](src/host.js)鉴权 `/media-desk` 请求，通过[目录所有权](src/write-owner.js)串行执行编辑。[Notes](src/notes.js)在 [Store](src/store.js) 读取时投影已登记 Markdown，并从持久化的已登记作品行中去掉当前和历史文字副本。[原生关联](src/native-sessions.js)保存控制器实际身份、Wiki／Notes 根目录、DSH home、preset 和初始模型。DSH 的 SessionController 管理运行中的 Agent；页面导航只改变客户端订阅。[浏览器入口](client/index.jsx)注册侧栏面板并打开已保存 Session。[Producer](src/produce.js)保留结构化策划案，通过同一份登记正文接受文字。
+
+[保存记录](src/notes-writes.js)在发布前保留独立候选、已接受原版本及移出的编辑器文件。一次 Store 替换接受引用、回执及关联结构化数据，随后发送通知。[逆向编辑](src/notes-undo.js)使用固定的前后版本；[迁移](src/notes-migration.js)验证备份，并在 Wiki 外保留回滚证据。
 
 </details>
 
@@ -142,8 +146,8 @@ pnpm test
 - 兼容范围固定为完整的 DSH `0.2.2-rc.1` Web profile。排期不向平台发布，整体成稿完成时仍可能存在失败图片，Host 中断的任务需要重新成稿。使用同一 DSH home 的 profile 共享工作台数据和关联。
 - 原生会话与工作台内嵌助手各有独立历史。内嵌助手、成稿和风格提炼仍直接调用模型。语法、构建检查和受控模型 fixture 不证明真实模型或账号服务行为。
 - 中断或失败的原生创建保留待建立状态。通过 `/media-desk/sessions` 或 `<DSH_HOME>/media-desk/sessions.json` 检查错误及已取得的实际 Session ID。不提供自动替代会话或待建立状态恢复。
-- 已有作品需要明确登记文件，尚不提供完整的旧数据／语言迁移，登记会拒绝保留旧语言分支的作品。设置、偏好、指标和媒体沿用各自现有存储。撤销保留此后再次改动的文字，不能按文本片段选择性合并；撤销失败时保留入口供修复。
-- 协作锁仅覆盖同机本地 Host。普通编辑器不参与，字节检查到文件替换之间仍有窗口，不能视为文件系统 compare-and-swap 或对普通编辑器的排他控制。Notes 与 Store 分别写入，没有主存发布日志或崩溃恢复回执。DSH 可在五秒关闭超时后强制退出，即使启动器退出码为零，成稿也可能仍处于中断状态。
+- 作品迁移保留旧文字、草稿、固定 AI 原稿和已保存语言。设置、可复用偏好、指标和媒体沿用各自现有存储。重叠的逆向编辑需要先修复冲突；撤销失败保留记录。任务候选须通过所属任务校验，重试保存才可接受。
+- 协作锁仅覆盖同机本地 Host，普通编辑器不参与。保留的编辑器句柄可在接受后继续修改移出的文件；后续读取保留双方版本并报告冲突。Notes 发布与 Store 接受分步执行，使用恢复日志，不构成文件系统事务。DSH 可在五秒关闭超时后强制退出，即使启动器退出码为零，成稿也可能仍处于中断状态。
 
 ### 开发备注
 

@@ -5,7 +5,9 @@
   </picture>
 </p>
 
-<h1 align="center">自媒体工作台</h1>
+# 自媒体工作台
+
+[English](GUIDE.md) | 中文
 
 <p align="center"><b>DeepSeek Harness 的一个插件。记一句灵感，一键做出脚本、封面、配图和分镜。</b></p>
 
@@ -57,6 +59,31 @@
 </td>
 </tr>
 </table>
+
+<br>
+
+<a id="notes-recovery"></a>
+## Notes 恢复
+
+使用本 fork 的完整 DSH `0.2.2-rc.1` Web profile，安装步骤见[包说明](README.zh.md#use-this-package)。
+
+「正文」格子编辑 `notes/works/<work-id>-<language>.md` 中的当前 Markdown。修改标题后，文件名仍保留作品身份。「作品语言」选择器在已保存版本之间切换；固定 AI 原稿和此前的草稿格式保留在 `notes/history/<work-id>/`。
+
+迁移已有作品时，打开工作台顶部的「恢复保存与迁移」，点击「迁移旧作品到 Notes」。迁移先创建并验证私有备份，再发布文件，保留作品身份、原始来源文字、草稿、AI 原稿和已保存语言。旧正文的语言不明时使用 `und`；界面语言不能代表作者语言。重复迁移返回同一份已完成回执。目标位置若已有无关文件，须先保留并改名，或明确登记该文件。
+
+保存失败时，保留编辑框文字并打开恢复对话框。修复提示的目录或权限问题后，对保留的候选点击「重试保存」。这会复用已保存内容及其接受身份，不重复请求模型或生图服务。任务候选未通过所属任务校验时，不能使用通用重试入口，对话框会提示这一限制。
+
+出现「版本冲突」时，点击「核对版本」，比较当前正文与保留的外部文件，再选择「保留当前正文」或「采用保留的外部正文」并应用选择。双方版本和候选均保留。格式无效的外部 Markdown 可查看，但须修复后才能采用。文件再次变化时，先刷新并核对新版本。持有旧文件句柄的编辑器可在选择后产生另一条冲突。
+
+撤销只还原已接受的编辑，并保留后来不重叠的文字或元数据修改。它针对该编辑保存的语言，不改变当前语言选择。修改重叠时报告冲突，保留撤销记录供修复。撤销不会恢复旧成稿执行状态或降低内容版本。
+
+回滚前停止选定的 DSH 写入者，并使用已构建的检出。将 `DSH_HOME` 和 `WIKI_PATH` 设为已停止 profile 的 home 与 Wiki，将 `MEDIA_DESK_MIGRATION_ID` 设为恢复对话框备份路径中的已验证备份身份，然后运行：
+
+```sh
+node src/notes-rollback.js "$MEDIA_DESK_MIGRATION_ID"
+```
+
+该命令验证并恢复备份数据，随后报告迁移后备份与存活证据的保留位置。新 Notes 文件、移出的编辑器字节和原生 Session 日志继续保留。重启前用旧包配合恢复的迁移前数据；不要让旧包读取 Notes 引用格式。
 
 <br>
 
@@ -145,6 +172,7 @@
 
 <br>
 
+<a id="get-started"></a>
 ## 三步上手
 
 要求 DeepSeek Harness `0.2.1-rc.5` 及以上的 `0.2.x`，已在 `0.2.2-rc.1` 的桌面版和网页版上测过。
@@ -169,6 +197,7 @@ dsh plugin --profile web add dsh-media-desk
 
 <br>
 
+<a id="what-it-costs"></a>
 ## 要花钱吗
 
 插件本身免费开源，不带任何密钥。用到模型的地方，走你自己的账号。
@@ -209,6 +238,7 @@ dsh plugin --profile web add dsh-media-desk
 
 <br>
 
+<a id="faq"></a>
 ## 问答
 
 <details>
@@ -285,11 +315,11 @@ dsh plugin --profile web add dsh-media-desk
 ## 开发
 
 ```bash
-npm install && npm test        # Host 逻辑测试
-npm run watch                  # 监听 client/ 并重新打包
-scripts/dev-sandbox.sh         # 在隔离的 DSH_HOME 里跑网页版，不碰 ~/.dsh
-node scripts/mock-llm.mjs      # 模拟文字和生图模型，不花额度
-npm pack                       # 打出可安装的 tgz
+npm install && npm test
+npm run watch
+scripts/dev-sandbox.sh
+node scripts/mock-llm.mjs
+npm pack
 ```
 
 `scripts/mock-monid.mjs` 是假的 `monid` 命令，内容全是编的，用来不花钱测导入流程：包成名为 `monid` 的可执行文件放到 `PATH` 最前面。

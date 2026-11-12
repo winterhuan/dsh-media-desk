@@ -65,9 +65,11 @@ sources: []
 Editable Markdown body.
 ```
 
-Only explicitly registered files become managed works. `notes/index.md` receives this data directory's navigation block; unrelated prose, links and notes remain intact. Editing the title does not rename the file. External byte changes are checked on reads and before edits or model-text acceptance, even when mtime is unchanged. Focused works refresh automatically. A stale save keeps the editor draft visible; **Cancel edits and reread** returns to the latest file. Missing, renamed or invalid files show a repair state. **Relink work file** accepts only a regular file in the owned Notes `works` directory with the same Work ID and language; it does not reconstruct the body.
+Only registered work files become managed works. `notes/index.md` receives this data directory's navigation block; unrelated prose, links and notes remain intact. Editing the title does not rename the file. External byte changes are checked on reads and before edits or model-text acceptance, even when mtime is unchanged. Focused works refresh automatically. A stale save keeps the editor draft visible; **Cancel edits and reread** returns to the latest file. Missing, renamed or invalid files show a repair state. **Relink work file** accepts only a regular file in the owned Notes `works` directory with the same Work ID and language; it does not reconstruct the body.
 
 Each Host holds cooperative locks on its canonical data directory and every saved or selected Notes root before initializing Store, Settings or Notes. Another Host sharing either directory stays unavailable without initializing content; other plugins remain usable. Normal plugin disable cancels owned work, waits for its writes and external cleanup, then releases ownership. Stop old releases before using this storage layout: they do not participate in these locks.
+
+Use **Recover saves and migrate** in the workbench header to move legacy work and its saved language versions to Notes after a verified backup. The **Work language** selector switches among retained versions. Failed saves keep their candidates; retry returns the original acceptance receipt without generating again. Conflict review lets you retain the current body or select a preserved external version. Undo reverses the accepted edit while retaining later disjoint changes. See [Notes recovery](GUIDE.md#notes-recovery) ([中文](GUIDE.zh.md#notes-recovery)) for migration, repair and offline rollback.
 
 <a id="development"></a>
 ## Development
@@ -85,7 +87,7 @@ The upstream source is JavaScript. `typecheck` checks JavaScript syntax in `src`
 
 The [native runtime fixture](test/fixtures/native-runtime.js) installs an isolated official Web profile and executes actual Loader, SessionController and tools against a temporary Wiki. Its model adapter controls only the external model response. The [skill instruction record](test/fixtures/llm-wiki.instructions.json) identifies the frozen `llm-wiki` instruction files; no personal Wiki pages are included.
 
-[Notes storage tests](test/notes-storage.test.js) cover public reads, edits, registration, repair, production and saved-root binding. [Ownership tests](test/write-ownership.test.js) use independent processes and held public Store operations to check contention, write drain and terminated-owner recovery.
+[Notes storage tests](test/notes-storage.test.js) cover public reads, edits, registration, repair and saved-root binding. [Recovery](test/notes-recovery.test.js), [undo](test/notes-undo.test.js) and [migration](test/notes-migration.test.js) exercise retained files and receipts through the public Host. [Ownership tests](test/write-ownership.test.js) use independent processes and held public Store operations to check contention, write drain and terminated-owner recovery.
 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
@@ -94,6 +96,8 @@ The [native runtime fixture](test/fixtures/native-runtime.js) installs an isolat
 <summary>Implementation internals — click to expand</summary>
 
 [The bundle patch](cordis.patch.yml) activates the package Host and a dedicated creative preset. [The Host](src/host.js) authenticates `/media-desk` requests and serializes edits through [directory ownership](src/write-owner.js). [Notes](src/notes.js) projects registered Markdown into [Store](src/store.js) reads and removes current or historical text copies from durable registered-work rows. [Native associations](src/native-sessions.js) persist actual controller identities, Wiki/Notes roots, DSH home, preset and initial model. DSH's SessionController owns live Agents; page navigation only changes Client subscriptions. [The browser entry](client/index.jsx) registers the sidebar panel and opens saved Sessions. [The producer](src/produce.js) preserves structured plans and uses the same registered body for accepted text.
+
+[Saved writes](src/notes-writes.js) retain independent candidates, accepted preimages and displaced editor files before publication. One Store replacement accepts references, receipts and associated structured data; notifications follow. [Inverse edits](src/notes-undo.js) use fixed before/after versions, while [migration](src/notes-migration.js) verifies backups and keeps rollback evidence outside the Wiki.
 
 </details>
 
@@ -142,8 +146,8 @@ The plugin does not manage a KV cache. Repeated prompt prefixes may be reused by
 - Compatibility is pinned to the complete DSH `0.2.2-rc.1` Web profile. Scheduling does not publish to platforms, image failures can coexist with a completed production, and interrupted Host jobs require restarting production. Profiles using the same DSH home share workbench data and associations.
 - Native conversations and the embedded workbench assistant have separate histories. The embedded assistant, production and style extraction retain direct model calls. Syntax/build checks and controlled-model fixtures do not establish real model or account-service behavior.
 - Interrupted or failed native creation stays pending. Inspect `/media-desk/sessions` or `<DSH_HOME>/media-desk/sessions.json` for its error and actual Session ID when available. Automatic replacement and pending-creation recovery are unavailable.
-- Existing works require explicit file registration; comprehensive legacy/language migration is unavailable, and registration rejects works with retained legacy language branches. Settings, preferences, metrics and media keep their existing storage. Undo retains text changed again later and cannot selectively merge text hunks; failed undo keeps its entry for repair.
-- Cooperative locks cover same-machine local Hosts. Ordinary editors do not take them, and byte checks have a check-to-replacement window; this is not filesystem compare-and-swap or ordinary-editor exclusion. Notes and Store are separate writes without a publication journal or crash-recovery receipt. DSH can force process exit after its five-second shutdown timeout, leaving production interrupted even when the launcher exits with code zero.
+- Work migration preserves legacy text, drafts, fixed AI originals and saved languages. Settings, reusable preferences, metrics and media keep their existing storage. Overlapping inverse edits require conflict repair; failed undo retains its record. Task-owned candidates need their task validation before a save retry can accept them.
+- Cooperative locks cover same-machine local Hosts. Ordinary editors do not take them. Retained editor handles can change displaced files after acceptance; subsequent reads preserve both versions and report a conflict. Notes publication and Store acceptance are separate steps, with a recovery journal rather than a filesystem transaction. DSH can force process exit after its five-second shutdown timeout, leaving production interrupted even when the launcher exits with code zero.
 
 ### Dev Note
 
