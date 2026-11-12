@@ -354,9 +354,11 @@ function parseOutput(stdout) {
  * @param {Function} [locate] - 测试时替换。
  * @returns {(args: string[]) => Promise<object|null>} 执行 monid 并返回 JSON；命令不存在时返回 null。
  */
-export function createMonidRunner(exec = execFile, locate = createLocator(exec)) {
+export function createMonidRunner(exec = execFile, locate = createLocator(exec), signal) {
   return async (args, timeoutSeconds = 30) => {
+    signal?.throwIfAborted()
     const found = await locate()
+    signal?.throwIfAborted()
     if (!found) return null
     // Windows 的 .cmd shim 不能直接用 execFile 起（spawn EINVAL）：改走 node + CLI 的 JS 入口，参数原样传、不经过 shell
     const file = found.entry ? process.execPath : found.bin
@@ -365,7 +367,8 @@ export function createMonidRunner(exec = execFile, locate = createLocator(exec))
     if (found.entry && process.versions.electron) env.ELECTRON_RUN_AS_NODE = '1'
     return new Promise((resolve, reject) => {
       // 不经过 shell，参数原样传给命令
-      exec(file, argv, { timeout: timeoutSeconds * 1000, maxBuffer: MAX_OUTPUT, env }, (err, stdout, stderr) => {
+      exec(file, argv, { timeout: timeoutSeconds * 1000, maxBuffer: MAX_OUTPUT, env, ...(signal ? { signal } : {}) }, (err, stdout, stderr) => {
+        if (signal?.aborted) return reject(signal.reason)
         const parsed = parseOutput(stdout)
         if (parsed) return resolve(parsed)
         if (err) return reject(new Error(text(String(stderr ?? '') || err.message, 200) || tr('Monid 命令运行失败')))
@@ -439,12 +442,13 @@ function sniffImage(buffer) {
 }
 
 /** 平台图片的地址会过期，封面要存到本地。失败时返回 null，内容照常导入。 */
-async function saveCover(raw, filesDir, fetchImpl) {
+async function saveCover(raw, filesDir, fetchImpl, signal) {
   try {
     let current = raw
     for (let hop = 0; hop < 3; hop += 1) {
       await assertPublicUrl(current)
-      const res = await fetchImpl(current, { redirect: 'manual', signal: AbortSignal.timeout(15_000) })
+      signal?.throwIfAborted()
+      const res = await fetchImpl(current, { redirect: 'manual', signal: AbortSignal.any([AbortSignal.timeout(15_000), ...(signal ? [signal] : [])]) })
       const location = res.headers.get('location')
       if (res.status >= 300 && res.status < 400 && location) {
         current = new URL(location, current).toString()
@@ -455,6 +459,7 @@ async function saveCover(raw, filesDir, fetchImpl) {
       const ext = buffer.length <= COVER_MAX_BYTES ? sniffImage(buffer) : null
       if (!ext) return null
       const name = `${newId('c')}${ext}`
+      signal?.throwIfAborted()
       await writeFile(join(filesDir, name), buffer)
       return `media-desk/files/${name}`
     }
@@ -463,13 +468,13 @@ async function saveCover(raw, filesDir, fetchImpl) {
 }
 
 /** 给还没有封面的内容下载封面，返回 外部ID → 本地地址。 */
-export async function saveCovers(posts, platform, state, filesDir, fetchImpl = fetch) {
+export async function saveCovers(posts, platform, state, filesDir, fetchImpl = fetch, signal) {
   const known = new Set(state.items.filter(item => item.media?.src && item.externalId).map(item => item.externalId))
   const queue = posts.filter(post => post.cover && !known.has(`${platform}:${post.id}`))
   const saved = new Map()
   const worker = async () => {
     for (let post = queue.shift(); post; post = queue.shift()) {
-      const src = await saveCover(post.cover, filesDir, fetchImpl)
+      const src = await saveCover(post.cover, filesDir, fetchImpl, signal)
       if (src) saved.set(post.id, src)
     }
   }

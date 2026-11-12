@@ -1,9 +1,10 @@
 // 持久化：$DSH_HOME/media-desk/state.json。桌面端和 Web 端读同一份数据。
-// 两个 Host 进程可能同时运行，所以每次写入前都按 mtime 判断是否需要重读。
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+// Host 持有数据与 Notes 目录的协作写锁；正文每次读取都核对实际字节。
+import { mkdir, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { buildSeed, migrateState } from './seed.js'
+import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 
 const MAX_UNDO = 30
 
@@ -61,7 +62,7 @@ export function dshHome(env = process.env) {
 }
 
 export class Store {
-  constructor(root = join(dshHome(), 'media-desk')) {
+  constructor(root = join(dshHome(), 'media-desk'), owner = null) {
     this.root = root
     this.file = join(root, 'state.json')
     this.filesDir = join(root, 'files')
@@ -69,6 +70,7 @@ export class Store {
     this.mtimeMs = 0
     this.undo = []
     this.queue = Promise.resolve()
+    this.owner = owner
   }
 
   async refresh() {
@@ -81,6 +83,7 @@ export class Store {
     }
     if (!info) {
       this.state = buildSeed(new Date())
+      if (this.notes) this.state.notesRoot = this.notes.root
       await this.persist()
       return
     }
@@ -89,15 +92,26 @@ export class Store {
     this.mtimeMs = info.mtimeMs
   }
 
-  async persist() {
-    const tmp = `${this.file}.${process.pid}.tmp`
-    await writeFile(tmp, JSON.stringify(this.state))
-    await rename(tmp, this.file)
+  async persist(state = this.state) {
+    await writeFileAtomic(this.file, JSON.stringify(state), { mode: 0o600, dirMode: 0o700 })
     this.mtimeMs = (await stat(this.file)).mtimeMs
+  }
+
+  async hydrated() {
+    if (!this.notes) return structuredClone(this.state)
+    const next = structuredClone(this.state)
+    const projected = await this.notes.hydrate(next)
+    await this.notes.syncIndex(projected)
+    if (!same(next, this.state)) {
+      await this.persist(next)
+      this.state = next
+    }
+    return projected
   }
 
   /** 串行执行，避免同一进程内的并发写互相覆盖。 */
   run(task) {
+    if (this.owner) return this.owner.run(task)
     const next = this.queue.then(task, task)
     this.queue = next.catch(() => {})
     return next
@@ -106,41 +120,50 @@ export class Store {
   read() {
     return this.run(async () => {
       await this.refresh()
-      return this.state
+      return this.hydrated()
     })
   }
 
   /**
    * @param {string} label - 显示在撤销入口上的说明。
    * @param {(state: object) => any} mutate - 就地修改状态。
-   * @param {{undoable?: boolean}} [options]
+   * @param {{undoable?: boolean, expectedContent?: object}} [options] - Optional previously read content versions; mismatches reject before edits.
    * @returns {Promise<any>} mutate 的返回值。
    */
-  mutate(label, mutate, { undoable = true } = {}) {
+  mutate(label, mutate, { undoable = true, expectedContent = {} } = {}) {
     return this.run(async () => {
       await this.refresh()
-      const before = undoable ? JSON.stringify(this.state) : null
-      const result = await mutate(this.state)
+      const draft = await this.hydrated()
+      this.notes?.assertExpected(draft, expectedContent)
+      const previous = structuredClone(draft)
+      const before = undoable ? JSON.stringify(draft) : null
+      const result = await mutate(draft)
+      const next = this.notes ? await this.notes.commit(previous, draft) : draft
+      await this.persist(next)
+      this.state = next
       if (undoable) {
-        const after = JSON.stringify(this.state)
+        const after = JSON.stringify(draft)
         // 什么都没改的操作不占撤销位，免得用户点撤销却没反应
         if (after !== before) {
           this.undo.push({ label, before, after })
           if (this.undo.length > MAX_UNDO) this.undo.shift()
         }
       }
-      await this.persist()
       return result
     })
   }
 
   undoLast() {
     return this.run(async () => {
-      const entry = this.undo.pop()
+      const entry = this.undo.at(-1)
       if (!entry) return null
       await this.refresh()
-      this.state = revertChange(JSON.parse(entry.before), JSON.parse(entry.after), this.state)
-      await this.persist()
+      const previous = await this.hydrated()
+      const draft = revertChange(JSON.parse(entry.before), JSON.parse(entry.after), previous)
+      const next = this.notes ? await this.notes.commit(previous, draft) : draft
+      await this.persist(next)
+      this.state = next
+      this.undo.pop()
       return entry.label
     })
   }

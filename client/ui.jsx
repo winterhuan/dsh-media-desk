@@ -1,6 +1,6 @@
 // 通用小组件：图标、按钮、对话框、提示。
 import React from 'react'
-import { setDesk, undo, useDesk } from './desk.js'
+import { getDesk, setDesk, undo, useDesk } from './desk.js'
 import { t } from './i18n.js'
 
 const PATHS = {
@@ -110,39 +110,53 @@ export function Dialog({ title, onClose, children, width = 440 }) {
 export function FormDialog() {
   const dialog = useDesk(s => s.dialog)
   const [values, setValues] = React.useState({})
+  const [pending, setPending] = React.useState(false)
+  const [error, setError] = React.useState(null)
   React.useEffect(() => {
     if (dialog) setValues(dialog.initial ?? {})
+    setPending(false)
+    setError(null)
   }, [dialog])
   if (!dialog) return null
   const close = () => setDesk({ dialog: null })
-  const submit = (event) => {
+  const submit = async (event) => {
     event.preventDefault()
-    dialog.onSubmit(values)
-    close()
+    if (pending) return
+    setPending(true)
+    setError(null)
+    try {
+      await dialog.onSubmit(values)
+      if (getDesk().dialog === dialog) close()
+    } catch (err) {
+      if (getDesk().dialog === dialog) setError(err.message)
+    } finally {
+      if (getDesk().dialog === dialog) setPending(false)
+    }
   }
   return (
     <Dialog title={dialog.title} onClose={close}>
-      <form onSubmit={submit} className="md-form">
+      <form onSubmit={submit} className="md-form" aria-busy={pending}>
         {dialog.fields.map(field => (
           field.type === 'hidden' ? <p key={field.name} className="md-muted">{field.label}</p> : <label key={field.name} className="md-field">
             <span>{field.label}</span>
             {field.type === 'textarea' ? (
-              <textarea rows={field.rows ?? 3} value={values[field.name] ?? ''} placeholder={field.placeholder} required={field.required} onChange={e => setValues(v => ({ ...v, [field.name]: e.target.value }))} />
+              <textarea rows={field.rows ?? 3} value={values[field.name] ?? ''} placeholder={field.placeholder} required={field.required} disabled={pending} onChange={e => setValues(v => ({ ...v, [field.name]: e.target.value }))} />
             ) : field.type === 'select' ? (
-              <select value={values[field.name] ?? ''} required={field.required} onChange={e => setValues(v => ({ ...v, [field.name]: e.target.value }))}>
+              <select value={values[field.name] ?? ''} required={field.required} disabled={pending} onChange={e => setValues(v => ({ ...v, [field.name]: e.target.value }))}>
                 {field.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             ) : (
-              <input type={field.type ?? 'text'} value={values[field.name] ?? ''} placeholder={field.placeholder} required={field.required} onChange={e => setValues(v => ({ ...v, [field.name]: e.target.value }))} />
+              <input type={field.type ?? 'text'} value={values[field.name] ?? ''} placeholder={field.placeholder} required={field.required} disabled={pending} onChange={e => setValues(v => ({ ...v, [field.name]: e.target.value }))} />
             )}
             {field.hint ? <small>{field.hint}</small> : null}
           </label>
         ))}
+        {error ? <p className="md-setup-note is-error md-form-error" role="alert">{error}</p> : null}
         <div className="md-form-foot">
-          {dialog.onDelete ? <button type="button" className="md-btn is-danger" onClick={() => { dialog.onDelete(); close() }}>{t('删除')}</button> : null}
+          {dialog.onDelete ? <button type="button" className="md-btn is-danger" disabled={pending} onClick={() => { dialog.onDelete(); close() }}>{t('删除')}</button> : null}
           <span style={{ flex: 1 }} />
           <button type="button" className="md-btn" onClick={close}>{t('取消')}</button>
-          <button type="submit" className="md-btn is-primary">{dialog.submitLabel ?? t('保存')}</button>
+          <button type="submit" className="md-btn is-primary" disabled={pending}>{pending ? t('保存中…') : dialog.submitLabel ?? t('保存')}</button>
         </div>
       </form>
     </Dialog>

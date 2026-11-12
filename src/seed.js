@@ -261,7 +261,7 @@ const CJK = /[\u4e00-\u9fff]/
 function stashChineseLeftovers(state) {
   if (state.sampleCleared) return
   for (const row of state.items ?? []) {
-    const text = row?.sample && !row.otherLang ? TABLES.en.items[row.id] : null
+    const text = row?.sample && !row.content && !row.otherLang ? TABLES.en.items[row.id] : null
     if (text?.media && same(row.media, TABLES.zh.items[row.id].media)) row.media = structuredClone(text.media)
     if (!text || !ITEM_FIELDS.some(field => row[field] !== undefined && CJK.test(JSON.stringify(row[field])))) continue
     swapItem(row, 'zh', 'en', text)
@@ -302,7 +302,7 @@ export function samplesNeedLocale(state, lang) {
 }
 
 /**
- * 把还是示例的行（sample: true）和没改过的内置预设换成另一种语言。
+ * 把未登记 Notes 的示例行和没改过的内置预设换成另一种语言。
  * 示例卡片的文字、成稿和草稿每种语言各存一份，来回切换不会丢；状态、排期、数据和用户自己的内容都不碰。按 id 对应，可以重复调用。
  * @param {object} state - 会被就地修改的状态。
  * @param {string} lang - 目标语言。
@@ -313,7 +313,7 @@ export function localizeSamples(state, lang) {
   const from = normalizeLang(state.sampleLang ?? 'zh')
   if (!state.sampleCleared) {
     for (const row of state.items ?? []) {
-      const to = row?.sample ? TABLES[target].items[row.id] : null
+      const to = row?.sample && !row.content ? TABLES[target].items[row.id] : null
       if (to) swapItem(row, from, target, to)
     }
     for (const key of ['people', 'angles', 'skills', 'accounts']) {

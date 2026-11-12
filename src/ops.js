@@ -15,6 +15,7 @@ export function statusLabel(status) {
 const ITEM_FIELDS = {
   title: 'text', body: 'text', kind: 'kind', url: 'url', source: 'text', tags: 'list', status: 'status', angleId: 'id',
   personaIds: 'list', parentId: 'id', rel: 'text', scheduledAt: 'date', platform: 'platform', pinned: 'bool', media: 'media', pos: 'pos', score: 'num',
+  language: 'language',
 }
 const PERSON_FIELDS = { name: 'text', role: 'text', note: 'text', traits: 'list', tone: 'num' }
 const ANGLE_FIELDS = { name: 'text', hook: 'text', prompt: 'text' }
@@ -43,6 +44,7 @@ function coerce(type, value) {
     case 'text': return typeof value === 'string' ? value.slice(0, 40000) : undefined
     case 'id': return value === null || typeof value === 'string' ? value : undefined
     case 'kind': return KINDS.includes(value) ? value : undefined
+    case 'language': return ['zh', 'en', 'und'].includes(value) ? value : undefined
     case 'status': return STATUSES.includes(value) ? value : undefined
     case 'platform': return value === null || PLATFORMS.includes(value) ? value : undefined
     case 'list': return Array.isArray(value) ? value.filter(v => typeof v === 'string').slice(0, 24) : undefined
@@ -173,7 +175,9 @@ const handlers = {
     const format = op.format === 'script' ? 'script' : 'article'
     if (typeof op.text !== 'string') throw new Error(tr('草稿内容无效'))
     const previous = item.drafts?.[format]
-    item.drafts = { ...item.drafts, [format]: { text: op.text.slice(0, 200000), by: op.by === 'ai' ? 'ai' : 'user', engine: typeof op.engine === 'string' ? op.engine : undefined, at: now, aiText: op.by === 'ai' ? op.text : previous?.aiText } }
+    for (const draft of Object.values(item.drafts ?? {})) draft.current = false
+    if (item.production) item.production.current = false
+    item.drafts = { ...item.drafts, [format]: { ...previous, current: true, text: op.text.slice(0, 200000), by: op.by === 'ai' ? 'ai' : 'user', engine: typeof op.engine === 'string' ? op.engine : undefined, at: now, aiText: op.by === 'ai' ? op.text : previous?.aiText } }
     if (['idea', 'outline'].includes(item.status)) item.status = 'draft'
     return { text: tr(format === 'script' ? '保存《{title}》的脚本' : '保存《{title}》的文章', { title: short(item.title) }), target: item.id, kind: 'item' }
   },
@@ -182,7 +186,11 @@ const handlers = {
     if (!item.production) throw new Error(tr('这条灵感还没有成稿'))
     if (typeof op.title === 'string') item.production.title = op.title.slice(0, 200)
     if (typeof op.coverText === 'string') item.production.coverText = op.coverText.slice(0, 40)
-    if (typeof op.article === 'string') item.production.article = op.article.slice(0, 200000)
+    if (typeof op.article === 'string') {
+      item.production.article = op.article.slice(0, 200000)
+      item.production.current = true
+      for (const draft of Object.values(item.drafts ?? {})) draft.current = false
+    }
     return { text: tr('修改《{title}》', { title: short(item.production.title) }), target: item.id, kind: 'item' }
   },
   add_person(state, op, now) {

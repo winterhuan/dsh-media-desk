@@ -35,7 +35,7 @@ async function request(path, body) {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-media-desk-lang': lang() }, body: JSON.stringify(body),
   })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || t('请求失败（{status}）', { status: res.status }))
+  if (!res.ok) throw Object.assign(new Error(data.error || t('请求失败（{status}）', { status: res.status })), { code: data.code })
   return data
 }
 
@@ -72,17 +72,37 @@ export async function openNativeSession(workId) {
   return association
 }
 
-export async function dispatchOps(ops, { label = t('操作'), undoable = true, silent = false } = {}) {
+export async function dispatchOps(ops, { label = t('操作'), undoable = true, silent = false, expectedContent, throwOnError = false } = {}) {
   try {
-    const data = await request('ops', { ops, label, undoable })
+    const versions = expectedContent ?? Object.fromEntries(ops.flatMap(op => {
+      const content = snapshot.state?.items.find(item => item.id === op.id)?.content
+      return content ? [[op.id, { revision: content.revision, sha256: content.sha256 }]] : []
+    }))
+    const data = await request('ops', { ops, label, undoable, expectedContent: versions })
     setDesk({ state: data.state, canUndo: undoable || snapshot.canUndo })
+    if (data.errors?.length && throwOnError) throw new Error(data.errors[0])
     if (data.errors?.length) toast(data.errors[0], { error: true })
     else if (!silent && data.receipts?.[0]) toast(data.receipts[0].text, { undo: undoable })
     return data
   } catch (err) {
+    if (throwOnError) throw err
     report(err)
     return null
   }
+}
+
+/** Register an explicitly selected existing Markdown file; validation failures stay with the form. */
+export async function registerWorkFile(id, language, relativePath) {
+  const data = await request('notes/register', { id, language, relativePath })
+  setDesk({ state: data.state })
+  toast(t('作品文件已登记'))
+}
+
+/** Relink a registered work without copying or rebuilding its primary text. */
+export async function relinkWorkFile(id, relativePath) {
+  const data = await request('notes/relink', { id, relativePath })
+  setDesk({ state: data.state })
+  toast(t('作品文件已重新关联'))
 }
 
 export async function undo() {
@@ -130,8 +150,19 @@ export async function regenAsset(id, target) {
   }
 }
 
-function mergeProduction(id, production, status) {
-  setDesk(s => ({ state: { ...s.state, items: s.state.items.map(item => (item.id === id ? { ...item, production, ...(status ? { status } : {}) } : item)) } }))
+function mergeWork(id, item) {
+  setDesk(s => ({ state: { ...s.state, items: item ? s.state.items.map(current => {
+    if (current.id !== id || (current.content?.revision ?? 0) > (item.content?.revision ?? 0)) return current
+    return item
+  }) : s.state.items.filter(current => current.id !== id) } }))
+}
+
+/** Refresh current Markdown, metadata and repair status through the existing production read. */
+export async function readWork(id) {
+  const data = await request(`production?id=${encodeURIComponent(id)}`)
+  mergeWork(id, data.item)
+  setDesk(s => ({ live: { ...s.live, [id]: data.live } }))
+  return data.item
 }
 
 /** 轮询进度，返回停止函数。 */
@@ -143,7 +174,7 @@ export function watchProduction(id) {
         const data = await request(`production?id=${encodeURIComponent(id)}`)
         if (stopped) return
         setDesk(s => ({ live: { ...s.live, [id]: data.live } }))
-        if (data.production) mergeProduction(id, data.production, data.status)
+        mergeWork(id, data.item)
       } catch {
         // 连接抖动时下一轮再试
       }

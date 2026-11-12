@@ -92,10 +92,10 @@ export class NativeSessions {
    * @returns {Promise<object[]>} Detached association records; no inputs are dispatched.
    */
   list() {
-    return withFileLock(this.file, async () => {
+    return this.store.run(() => withFileLock(this.file, async () => {
       await this.reload()
       return structuredClone(this.associations)
-    })
+    }))
   }
 
   /**
@@ -110,7 +110,7 @@ export class NativeSessions {
     }
     const existing = this.operations.get(workId)
     if (existing) return existing
-    const operation = withFileLock(this.file, async () => {
+    const operation = this.store.run(() => withFileLock(this.file, async () => {
       await this.reload()
       const work = workId === null ? null : (await this.store.read()).items.find(row => row.id === workId)
       if (workId !== null && !work) {
@@ -118,23 +118,31 @@ export class NativeSessions {
       }
       const saved = this.associations.find(row => row.workId === workId)
       if (saved) return this.restore(saved)
-      return this.create(workId, work?.title?.trim() || workId)
-    })
+      if (work?.content && (work.content.status !== 'ready' || !this.store.notes.roots.has(work.content.notesRoot))) {
+        throw failure(work.content.code ?? 'notes/unowned-root', work.content.error ?? tr('作品所在的 Notes 目录尚未取得写入所有权'))
+      }
+      if (work?.content && typeof work.content.wikiRoot !== 'string') throw failure('association/wiki-binding-missing', tr('作品尚未登记 Wiki 位置，请修复作品关联'))
+      return this.create(workId, work?.title?.trim() || workId, work?.content?.wikiRoot ?? this.wikiPath, work?.content?.notesRoot)
+    }))
     this.operations.set(workId, operation)
     operation.then(() => this.operations.delete(workId), () => this.operations.delete(workId))
     return operation
   }
 
-  async create(workId, title) {
+  async create(workId, title, wikiPath, registeredNotesRoot) {
     const controller = this.service('sessionController')
     await this.preset()
-    const wikiRoot = await wikiDirectory(this.wikiPath)
+    const wikiRoot = await wikiDirectory(wikiPath)
+    const notesRoot = await realpath(join(wikiRoot, 'notes'))
+    if (!this.store.notes.roots.has(notesRoot) || registeredNotesRoot && registeredNotesRoot !== notesRoot) {
+      throw failure('association/notes-mismatch', tr('作品文件与 Wiki 位置不一致，请修复作品关联'))
+    }
     const { workspace } = await this.service('workspaceController').create({ path: wikiRoot })
     const settings = await this.settings.read()
     const model = settings.assistant.provider && settings.assistant.model
       ? settings.assistant : this.service('agentDefaultModel').currentSelection()
     const pending = { id: randomUUID(), workId, status: 'pending', dshHome: this.home,
-      wikiRoot, notesRoot: join(wikiRoot, 'notes'), workspaceId: workspace.workspaceId, preset: PRESET,
+      wikiRoot, notesRoot, workspaceId: workspace.workspaceId, preset: PRESET,
       model: { ...model }, createdAt: new Date().toISOString() }
     this.associations.push(pending)
     await this.save()

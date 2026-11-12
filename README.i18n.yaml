@@ -3,29 +3,32 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write README.md
 /:
-  en: 75ebab83989351e1
-  zh: a41e44b79c0aa416
+  en: 533f17483613d9f6
+  zh: 55f5e821dab9ed6a
 /winterhuan-dsh-media-desk:
   en: 2db07af5a1dca740
   zh: 2ca863a3854c142e
 /winterhuan-dsh-media-desk/summary:
-  en: 8b3ea3c52621d1b4
-  zh: bd08f074766b76c5
+  en: 2189a69307fb76ad
+  zh: ec53b758d2cd9951
 /winterhuan-dsh-media-desk/table-of-contents:
   en: d82a25774fdda2a7
   zh: 74a5455dea14a89f
 /winterhuan-dsh-media-desk/use-this-package:
-  en: 91a140252e03cb1a
-  zh: b29417616dc67853
+  en: 9a36fbcaf9c83a99
+  zh: 5b2a3d30e3faf094
 /winterhuan-dsh-media-desk/use-this-package/native-conversations:
-  en: 1f2a261512520dbe
-  zh: 0bab479018f1aaa3
+  en: 0d0bbf52172dca24
+  zh: a19e7a8a40f5d2cb
+/winterhuan-dsh-media-desk/use-this-package/notes-work-files:
+  en: 59c13382e9d984ea
+  zh: 60117acc5efe2697
 /winterhuan-dsh-media-desk/development:
-  en: 51de2ec903a832ac
-  zh: 0358829acc347aea
+  en: 492b1d4c5a626e3e
+  zh: e305d39ce2f65432
 /winterhuan-dsh-media-desk/understand-the-implementation:
-  en: bd098bd759f92ec9
-  zh: f216b14e3e8d50ac
+  en: aef0f88a9da8be92
+  zh: 2fd78a3189474382
 /winterhuan-dsh-media-desk/further-exploration:
   en: 2bd3be0480372495
   zh: 8187054a2bb73df4
@@ -48,8 +51,8 @@
   en: e78c0259ebd4c505
   zh: ee839162694e500d
 /winterhuan-dsh-media-desk/model-experience/workbench-context/what-the-model-sees:
-  en: a990e5ce92460b2c
-  zh: a9cbff9b022ebdc9
+  en: 0d68d7899c652f36
+  zh: 735365183ecadcab
 /winterhuan-dsh-media-desk/model-experience/workbench-context/token-effect:
   en: 46fecd19ae8be372
   zh: cbf228ee665c2bc7
@@ -57,8 +60,8 @@
   en: 9095df0a98b9f267
   zh: 9e7f343181e1ed48
 /winterhuan-dsh-media-desk/known-limitations-and-deferred-work:
-  en: 82ac03eb112bc75a
-  zh: bd0ad8fdf896cc69
+  en: 48a8fe296af366e4
+  zh: 29e80089518a7da1
 /winterhuan-dsh-media-desk/known-limitations-and-deferred-work/dev-note:
   en: 0a1253c6f7b5e8b9
   zh: 9f56528562c7c914

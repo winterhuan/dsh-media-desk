@@ -1,7 +1,8 @@
 // 工作台设置。密钥和内容数据分开存放，文件权限 600，也不会返回给浏览器。
-import { chmod, readFile, rename, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tr } from './i18n.js'
+import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 
 const DEFAULTS = {
   image: { source: 'http', baseUrl: '', model: '', apiKey: '', size: '1536x1024', quality: '', toolSize: '1536x1024', toolQuality: '', extra: '' },
@@ -20,12 +21,17 @@ function clamp(value, min, max, fallback) {
 }
 
 export class Settings {
-  constructor(root) {
+  constructor(root, owner = null) {
     this.file = join(root, 'settings.json')
     this.value = null
+    this.owner = owner
   }
 
-  async read() {
+  read() {
+    return this.owner ? this.owner.run(() => this.readValue()) : this.readValue()
+  }
+
+  async readValue() {
     // 每次都读文件：桌面版和 Web 版可能同时运行
     try {
       const saved = JSON.parse(await readFile(this.file, 'utf8'))
@@ -38,7 +44,11 @@ export class Settings {
   }
 
   /** 空密钥表示不修改，clearKey 才会删除。 */
-  async update(patch) {
+  update(patch) {
+    return this.owner ? this.owner.run(() => this.updateValue(patch)) : this.updateValue(patch)
+  }
+
+  async updateValue(patch) {
     const current = await this.read()
     const next = structuredClone(current)
     const image = patch.image ?? {}
@@ -90,10 +100,7 @@ export class Settings {
     if (patch.imageCount !== undefined) next.imageCount = clamp(patch.imageCount, 0, 4, current.imageCount)
     if (['auto', 'zh', 'en'].includes(patch.language)) next.language = patch.language
     if (patch.shotCount !== undefined) next.shotCount = clamp(patch.shotCount, 0, 12, current.shotCount)
-    const tmp = `${this.file}.${process.pid}.tmp`
-    await writeFile(tmp, JSON.stringify(next, null, 2), { mode: 0o600 })
-    await chmod(tmp, 0o600)
-    await rename(tmp, this.file)
+    await writeFileAtomic(this.file, JSON.stringify(next, null, 2), { mode: 0o600, dirMode: 0o700 })
     this.value = next
     return next
   }

@@ -4,6 +4,8 @@ import { execFile } from 'node:child_process'
 import { stat, writeFile } from 'node:fs/promises'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { homedir } from 'node:os'
+import { pipeline } from 'node:stream/promises'
 import { Service } from '@deepseek-ai/cordis'
 import { assistantModelOverride, callModel, chatPrompts, defaultSelection, extractJson, modelInfo, modelStatus, setAssistantModel } from './ai.js'
 import { defaultExportDir, resolveExportDir, saveProduction } from './export.js'
@@ -21,12 +23,15 @@ import { dshHome, Store } from './store.js'
 import { currentLang, platformName, tr, withLang } from './i18n.js'
 import { localizeSamples, samplesNeedLocale } from './seed.js'
 import { NativeSessions } from './native-sessions.js'
+import { Notes } from './notes.js'
+import { WriteOwner } from './write-owner.js'
 
 const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets')
 const MAX_JSON = 4_000_000
 const MAX_UPLOAD = 250_000_000
 const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' }
 const UPLOAD_EXT = Object.fromEntries(Object.entries(MIME).filter(([ext]) => ext !== '.jpeg').map(([ext, type]) => [type, ext]))
+const SERIAL_ROUTES = new Set(['ops', 'undo', 'settings', 'upload', 'produce', 'produce/cancel', 'produce/regen', 'produce/save', 'skills/export', 'notes/register', 'notes/relink', 'chat/clear', 'sessions/open', 'sessions', 'state', 'production'])
 
 function json(res, status, body) {
   res.statusCode = status
@@ -57,7 +62,7 @@ async function readJson(req) {
 }
 
 /** 支持 Range，视频才能正常拖动和循环。 */
-async function sendFile(req, res, file) {
+async function sendFile(req, res, file, signal) {
   const type = MIME[extname(file).toLowerCase()]
   if (!type) return json(res, 404, { error: tr('不支持的文件类型') })
   let info
@@ -82,12 +87,12 @@ async function sendFile(req, res, file) {
     res.statusCode = 206
     res.setHeader('content-range', `bytes ${start}-${end}/${info.size}`)
     res.setHeader('content-length', end - start + 1)
-    return createReadStream(file, { start, end }).pipe(res)
+    return pipeline(createReadStream(file, { start, end }), res, { signal })
   }
   res.statusCode = 200
   res.setHeader('content-length', info.size)
   if (req.method === 'HEAD') return res.end()
-  return createReadStream(file).pipe(res)
+  return pipeline(createReadStream(file), res, { signal })
 }
 
 function engineLabel(ctx) {
@@ -106,6 +111,7 @@ async function chatTurn(ctx, store, desk, body) {
   if (!message) throw Object.assign(new Error(tr('消息为空')), { status: 400 })
   const focusId = typeof body.focusId === 'string' ? body.focusId : undefined
   const state = await store.read()
+  store.notes.assertExpected(state, body.expectedContent ?? {})
   const snapshot = JSON.parse(JSON.stringify(state))
   let plan
   let engine = 'local'
@@ -115,7 +121,7 @@ async function chatTurn(ctx, store, desk, body) {
     const history = snapshot.chat.filter(row => (row.itemId ?? null) === (focusId ?? null))
     const { system, user } = chatPrompts(snapshot, message, { focusId, history })
     const editing = snapshot.items.find(row => row.id === focusId)?.production?.status === 'done'
-    const { text, model } = await callModel(ctx, { system, user, maxTokens: editing ? 8000 : 2000, light: true, signal: AbortSignal.timeout(editing ? 240_000 : 90_000) })
+    const { text, model } = await callModel(ctx, { system, user, maxTokens: editing ? 8000 : 2000, light: true, signal: AbortSignal.any([desk.ownership.signal, AbortSignal.timeout(editing ? 240_000 : 90_000)]) })
     engine = model
     try {
       plan = extractJson(text)
@@ -125,11 +131,15 @@ async function chatTurn(ctx, store, desk, body) {
       plan = { reply: text.trim().slice(0, 1200) || tr('我没有听懂，可以换个说法吗？'), ops: [] }
     }
   } catch {
+    desk.ownership.signal.throwIfAborted()
     notice = outageNotice(ctx, wasDown, tr('先用本地规则处理'))
     plan = localIntent(snapshot, message, { focusId })
   }
   const settings = await desk.settings.read()
   const canDraw = desk.producer.ready(settings)
+  const affected = new Set((Array.isArray(plan.ops) ? plan.ops : []).map(op => op?.id))
+  if (focusId && plan.revise) affected.add(focusId)
+  const expectedContent = Object.fromEntries(snapshot.items.filter(item => item.content && affected.has(item.id)).map(item => [item.id, item.content]))
   // 只把真正改了数据的那一步放进撤销；问一句话不占撤销位
   const changed = await store.mutate(tr('对话：{text}', { text: message.slice(0, 18) }), (draft) => {
     const target = focusId ? draft.items.find(row => row.id === focusId) : null
@@ -149,7 +159,7 @@ async function chatTurn(ctx, store, desk, body) {
       targets = canDraw ? revision.targets : []
     }
     return { receipts, errors, targets, done: Boolean(production) }
-  })
+  }, { expectedContent })
   const result = await store.mutate('对话记录', (draft) => {
     const { receipts, errors, targets, done } = changed
     const at = new Date().toISOString()
@@ -171,16 +181,17 @@ async function chatTurn(ctx, store, desk, body) {
   return result
 }
 
-async function extractStyle(ctx, store, body) {
+async function extractStyle(ctx, store, body, signal) {
   const urls = (Array.isArray(body.urls) ? body.urls : []).map(row => String(row).trim()).filter(Boolean).slice(0, 5)
   const parts = [String(body.text ?? '').trim()].filter(Boolean)
   const failures = []
   for (const url of urls) {
     try {
-      const page = await harvestText(url)
+      const page = await harvestText(url, fetch, signal)
       if (page.text.length >= 80) parts.push(`${page.title ?? ''}\n${page.text}`)
       else failures.push(tr('{url}：页面上几乎没有文字，可能需要登录', { url }))
     } catch (err) {
+      signal.throwIfAborted()
       failures.push(tr('{url}：{error}', { url, error: err.message }))
     }
   }
@@ -190,15 +201,15 @@ async function extractStyle(ctx, store, body) {
   }
   const name = typeof body.name === 'string' ? body.name.trim().slice(0, 20) : ''
   const source = urls.length && parts.length === urls.length ? tr('链接') : urls.length ? tr('内容和链接') : tr('内容')
-  return styleFromMaterial(ctx, store, { material, name, source, sourceUrls: urls, failures })
+  return styleFromMaterial(ctx, store, { material, name, source, sourceUrls: urls, failures, signal })
 }
 
 /** 提炼一张风格卡并设为当前风格。同一个账号再抓一次时更新原来那张。 */
-async function styleFromMaterial(ctx, store, { material, name, source, sourceUrls = [], failures = [], accountKey = null }) {
+async function styleFromMaterial(ctx, store, { material, name, source, sourceUrls = [], failures = [], accountKey = null, signal }) {
   let style
   try {
     const { system, user } = stylePrompts(material, name)
-    const { text } = await callModel(ctx, { system, user, maxTokens: 1500, light: true, signal: AbortSignal.timeout(120_000) })
+    const { text } = await callModel(ctx, { system, user, maxTokens: 1500, light: true, signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]) })
     style = normalizeStyle(extractJson(text), name)
   } catch (err) {
     throw Object.assign(new Error(tr('提炼风格需要文字模型：{error}', { error: err.message })), { status: 502 })
@@ -220,14 +231,16 @@ async function importAccountRoute(ctx, store, desk, body) {
   try {
     const account = await resolveAccount(body.text)
     const { posts, profile, cost } = await fetchAccount(account, desk.monid)
-    const covers = await saveCovers(posts, account.platform, await store.read(), store.filesDir)
+    const sourceState = await store.read()
+    const covers = await store.run(() => saveCovers(posts, account.platform, sourceState, store.filesDir, fetch, desk.ownership.signal))
+    desk.ownership.signal.throwIfAborted()
     const added = await store.mutate(tr('导入{platform}账号', { platform: platformName(account.platform) }), draft => importPosts(draft, { account, profile, posts, covers }).added)
     const nickname = profile.nickname || platformName(account.platform)
     let styleError = null
     const material = postsToMaterial(posts)
     if (material.length >= 80) {
       try {
-        await styleFromMaterial(ctx, store, { material, name: nickname, source: tr('{platform}账号', { platform: platformName(account.platform) }), sourceUrls: [account.url], accountKey: `${account.platform}:${account.id}` })
+        await styleFromMaterial(ctx, store, { material, name: nickname, source: tr('{platform}账号', { platform: platformName(account.platform) }), sourceUrls: [account.url], accountKey: `${account.platform}:${account.id}`, signal: desk.ownership.signal })
       } catch (err) {
         styleError = err.message
       }
@@ -240,9 +253,10 @@ async function importAccountRoute(ctx, store, desk, body) {
   }
 }
 
-async function addFromUrl(ctx, store, body) {
+async function addFromUrl(ctx, store, body, signal) {
   const url = String(body.url || '').trim()
-  const info = await harvest(url)
+  const info = await harvest(url, fetch, signal)
+  signal.throwIfAborted()
   const op = {
     op: 'add_item', kind: 'web', title: body.title || info.title || url, body: body.note || info.description || '', url: info.url, source: info.siteName, tags: Array.isArray(body.tags) ? body.tags : [],
     media: info.image ? { src: info.image } : null,
@@ -253,16 +267,17 @@ async function addFromUrl(ctx, store, body) {
   })
 }
 
-async function refreshAccount(store, body) {
+async function refreshAccount(store, body, signal) {
   const url = String(body.url || '').trim()
   const now = new Date().toISOString()
   let patch
   try {
-    const info = await harvest(url)
+    const info = await harvest(url, fetch, signal)
     patch = { url: info.url, title: info.title ?? undefined, description: info.description ?? undefined, avatar: info.image ?? undefined, fetchedAt: now, fetchError: '', ...(info.followers ? { followers: info.followers } : {}) }
   } catch (err) {
     patch = { url, fetchedAt: now, fetchError: err.message }
   }
+  signal.throwIfAborted()
   return store.mutate(tr('更新账号档案'), (draft) => {
     const op = body.id ? { op: 'update_account', id: body.id, ...patch } : { op: 'add_account', platform: body.platform ?? '', handle: body.handle ?? '', ...patch }
     const { errors } = applyOps(draft, [op])
@@ -277,7 +292,7 @@ async function handleUpload(req, store, res) {
   const buffer = await readBuffer(req, MAX_UPLOAD)
   await store.read()
   const name = `${newId('f')}${ext}`
-  await writeFile(join(store.filesDir, name), buffer)
+  await store.run(() => { store.owner.signal.throwIfAborted(); return writeFile(join(store.filesDir, name), buffer) })
   return json(res, 200, { src: `media-desk/files/${name}`, kind: type.startsWith('video/') ? 'video' : 'image' })
 }
 
@@ -289,13 +304,13 @@ async function route(ctx, store, desk, req, res) {
   if ((method === 'GET' || method === 'HEAD') && path.startsWith('assets/')) {
     const name = path.slice('assets/'.length)
     if (!/^[\w.-]+$/.test(name)) return json(res, 400, { error: tr('路径无效') })
-    return sendFile(req, res, join(ASSETS_DIR, name))
+    return sendFile(req, res, join(ASSETS_DIR, name), desk.ownership.signal)
   }
   if ((method === 'GET' || method === 'HEAD') && path.startsWith('files/')) {
     const name = path.slice('files/'.length)
     if (!/^[\w.-]+$/.test(name)) return json(res, 400, { error: tr('路径无效') })
     await store.read()
-    return sendFile(req, res, join(store.filesDir, name))
+    return sendFile(req, res, join(store.filesDir, name), desk.ownership.signal)
   }
   if (method === 'GET') {
     if (path === 'sessions') return json(res, 200, { associations: await desk.nativeSessions.list() })
@@ -311,7 +326,7 @@ async function route(ctx, store, desk, req, res) {
       await desk.producer.settle(id)
       const state = await store.read()
       const item = state.items.find(row => row.id === id)
-      return json(res, 200, { production: item?.production ?? null, status: item?.status, live: desk.producer.status(id) })
+      return json(res, 200, { item: item ?? null, production: item?.production ?? null, status: item?.status, live: desk.producer.status(id) })
     }
     if (path === 'settings') return json(res, 200, { ...publicSettings(await desk.settings.read(), Boolean(imageTool(ctx))), defaultExportDir: defaultExportDir() })
     if (path === 'models') {
@@ -341,6 +356,25 @@ async function route(ctx, store, desk, req, res) {
   if (path === 'upload') return handleUpload(req, store, res)
   const body = await readJson(req)
   switch (path) {
+    case 'notes/register': {
+      const result = await store.mutate(tr('登记作品文件'), async draft => {
+        const item = draft.items.find(row => row.id === body.id)
+        if (!item) throw Object.assign(new Error(tr('作品不存在：{id}', { id: body.id })), { status: 404 })
+        const saved = desk.nativeSessions.associations.find(row => row.workId === item.id)
+        await store.notes.register(item, body.language, body.relativePath, saved?.notesRoot ?? store.notes.root, saved?.wikiRoot ?? store.notes.wikiRoot)
+        return { state: draft }
+      }, { undoable: false })
+      return json(res, 200, result)
+    }
+    case 'notes/relink': {
+      const result = await store.mutate(tr('重新关联作品文件'), async draft => {
+        const item = draft.items.find(row => row.id === body.id)
+        if (!item?.content) throw Object.assign(new Error(tr('作品尚未登记 Notes 文件')), { code: 'notes/not-registered', status: 409 })
+        await store.notes.relink(item, body.relativePath)
+        return { state: draft }
+      }, { undoable: false })
+      return json(res, 200, result)
+    }
     case 'sessions/open':
       return json(res, 200, { association: await desk.nativeSessions.open(body.workId ?? null) })
     case 'ops': {
@@ -348,7 +382,7 @@ async function route(ctx, store, desk, req, res) {
       const result = await store.mutate(label, (draft) => {
         const applied = applyOps(draft, body.ops)
         return { ...applied, state: draft }
-      }, { undoable: body.undoable !== false })
+      }, { undoable: body.undoable !== false, expectedContent: body.expectedContent ?? {} })
       return json(res, 200, result)
     }
     case 'undo': {
@@ -400,7 +434,7 @@ async function route(ctx, store, desk, req, res) {
       execFile(command, [path], () => {})
       return json(res, 200, { path })
     }
-    case 'style/extract': return json(res, 200, await extractStyle(ctx, store, body))
+    case 'style/extract': return json(res, 200, await extractStyle(ctx, store, body, desk.ownership.signal))
     case 'monid/import': return json(res, 200, await importAccountRoute(ctx, store, desk, body))
     case 'settings': {
       const before = modelInfo(ctx)
@@ -416,12 +450,13 @@ async function route(ctx, store, desk, req, res) {
       if (!desk.producer.ready(settings)) return json(res, 400, { error: tr(settings.image.source === 'tool' ? '未找到订阅生图工具，或默认执行器不支持直接调用；请检查插件和执行器后刷新工作台' : '先填好接口地址、模型和密钥') })
       await store.read()
       const { buffer, ext } = await desk.producer.generate(settings.image, 'A single paper boat on calm water, black and white pencil line art sketch, plain white paper background, no text.')
+      desk.ownership.signal.throwIfAborted()
       const name = `${newId('t')}${ext}`
-      await writeFile(join(store.filesDir, name), buffer)
+      await store.run(() => writeFile(join(store.filesDir, name), buffer))
       return json(res, 200, { src: `media-desk/files/${name}` })
     }
-    case 'capture-url': return json(res, 200, await addFromUrl(ctx, store, body))
-    case 'account/refresh': return json(res, 200, await refreshAccount(store, body))
+    case 'capture-url': return json(res, 200, await addFromUrl(ctx, store, body, desk.ownership.signal))
+    case 'account/refresh': return json(res, 200, await refreshAccount(store, body, desk.ownership.signal))
     case 'skills/learn': {
       const proposals = proposeRules(await store.read())
       if (!proposals.length) return json(res, 200, { added: 0, state: await store.read() })
@@ -472,23 +507,34 @@ export default class MediaDeskHost extends Service {
    */
   constructor(ctx, config = {}) {
     super(ctx, 'mediaDesk')
-    const store = new Store()
-    const settings = new Settings(store.root)
-    const producer = new Producer({
-      store, settings, callText: options => callModel(ctx, options),
-      ready: saved => imageReady(saved, Boolean(imageTool(ctx))),
-      generate: (image, prompt, options) => image.source === 'tool' ? generateToolImage(ctx, image, prompt, options) : generateImage(image, prompt, options),
-    })
-    const monid = createMonidRunner()
-    const nativeSessions = new NativeSessions(ctx, store, settings, config)
-    Object.assign(this, { store, settings, producer, monid, nativeSessions })
+    this.config = config
   }
 
   async [Service.init]() {
     const ctx = this.ctx
-    const { store, settings, nativeSessions } = this
+    const config = this.config
+    const ownership = new WriteOwner(join(dshHome(), 'media-desk'), config.wikiPath ?? process.env.WIKI_PATH ?? join(homedir(), 'wiki'))
+    this.ownership = ownership
+    ctx.effect(() => () => this.close(), 'media-desk: writer ownership')
+    await ownership.acquire()
+    const store = new Store(ownership.dataRoot, ownership)
+    const settings = new Settings(store.root, ownership)
+    const producer = new Producer({
+      store, settings, callText: options => callModel(ctx, { ...options, signal: AbortSignal.any([ownership.signal, ...(options.signal ? [options.signal] : [])]) }),
+      ready: saved => imageReady(saved, Boolean(imageTool(ctx))),
+      generate: (image, prompt, options = {}) => {
+        const request = { ...options, signal: AbortSignal.any([ownership.signal, ...(options.signal ? [options.signal] : [])]) }
+        return image.source === 'tool' ? generateToolImage(ctx, image, prompt, request) : generateImage(image, prompt, request)
+      },
+      onError: error => ctx.logger.error(error),
+    })
+    const monid = createMonidRunner(undefined, undefined, ownership.signal)
+    const nativeSessions = new NativeSessions(ctx, store, settings, config)
+    store.notes = new Notes(ownership)
+    Object.assign(this, { store, settings, producer, monid, nativeSessions })
     const desk = this
     await nativeSessions.init()
+    await store.notes.init()
     await store.read()
     // 启动时恢复用户在工作台里选过的助手模型
     setAssistantModel((await settings.read()).assistant)
@@ -509,7 +555,15 @@ export default class MediaDeskHost extends Service {
             json(res, rejection, { error: tr('未授权') })
             return
           }
-          await withLang(req.headers['x-media-desk-lang'], () => route(ctx, store, desk, req, res))
+          await ownership.track(async () => {
+            const abort = () => req.destroy?.(ownership.signal.reason)
+            ownership.signal.addEventListener('abort', abort, { once: true })
+            try {
+              const path = new URL(req.url || '/', 'http://local').pathname.replace(/^\/media-desk\/?/, '')
+              const request = () => withLang(req.headers['x-media-desk-lang'], () => route(ctx, store, desk, req, res))
+              await (SERIAL_ROUTES.has(path) ? ownership.run(request) : request())
+            } finally { ownership.signal.removeEventListener('abort', abort) }
+          })
         } catch (err) {
           if (res.headersSent) {
             res.end()
@@ -519,5 +573,17 @@ export default class MediaDeskHost extends Service {
         }
       },
     }), 'dsh-media-desk: /media-desk routes')
+  }
+
+  /** Stop Host-owned tasks and drain admitted writes before releasing directory ownership. */
+  close() {
+    if (this.closingPromise) return this.closingPromise
+    this.ownership.beginShutdown()
+    this.closingPromise = (async () => {
+      await this.producer?.close()
+      await this.ownership.drain()
+      await this.ownership.release()
+    })()
+    return this.closingPromise
   }
 }

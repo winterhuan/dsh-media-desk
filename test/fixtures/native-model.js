@@ -1,5 +1,6 @@
 /** Deterministic model adapter; Loader, Sessions, skills and native tools execute normally. */
-import { appendFile } from 'node:fs/promises'
+import { appendFile, readFile, writeFile } from 'node:fs/promises'
+import { setTimeout } from 'node:timers/promises'
 import { LlmAdapter } from '@deepseek-ai/dsh-llm'
 
 /** External model provider used by the isolated runtime assembly. */
@@ -13,6 +14,14 @@ export const inject = ['llm']
  */
 export function apply(ctx, config) {
   let nextCall = 0
+  const replies = new Map()
+  const waitForFile = async (path, signal) => {
+    for (;;) {
+      signal?.throwIfAborted()
+      try { await readFile(path); return } catch (error) { if (error.code !== 'ENOENT') throw error }
+      await setTimeout(25, undefined, { signal })
+    }
+  }
   class NativeModel extends LlmAdapter {
     async listModels(provider) {
       return ['native-fixture', 'native-second'].map(id => ({ provider, id, name: id, contextWindow: 100000, maxTokens: 16000 }))
@@ -33,6 +42,17 @@ export function apply(ctx, config) {
           context: options.messages,
         }) + '\n')
       }
+      if (recipe.barrier) {
+        const { enteredPath, releasePath, abortedPath, cleanupReleasePath, settledPath } = recipe.barrier
+        await writeFile(enteredPath, 'entered\n')
+        try {
+          await waitForFile(releasePath, options.signal)
+        } finally {
+          if (options.signal?.aborted) await writeFile(abortedPath, 'aborted\n')
+          if (cleanupReleasePath) await waitForFile(cleanupReleasePath)
+          await writeFile(settledPath, options.signal?.aborted ? 'aborted\n' : 'completed\n')
+        }
+      }
       if (call) {
         const id = 'native-fixture-' + (++nextCall)
         const args = JSON.stringify(call.arguments)
@@ -41,9 +61,13 @@ export function apply(ctx, config) {
         yield { type: 'block-end', index: 0, block: { type: 'tool-call', id, name: call.name, arguments: args } }
         yield { type: 'finish', reason: { kind: 'tool-calls' } }
       } else {
+        const count = replies.get(marker) ?? 0
+        const reply = recipe.replies ? recipe.replies[count] : recipe.reply
+        if (typeof reply !== 'string') throw new Error(`External model recipe exhausted: ${marker}`)
+        replies.set(marker, count + 1)
         yield { type: 'block-start', index: 0, blockType: 'text' }
-        yield { type: 'text-delta', index: 0, text: recipe.reply }
-        yield { type: 'block-end', index: 0, block: { type: 'text', text: recipe.reply } }
+        yield { type: 'text-delta', index: 0, text: reply }
+        yield { type: 'block-end', index: 0, block: { type: 'text', text: reply } }
         yield { type: 'finish', reason: { kind: 'stop' } }
       }
     }

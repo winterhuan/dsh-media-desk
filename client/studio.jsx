@@ -2,7 +2,7 @@
 import React from 'react'
 import { ChatPanel } from './chat.jsx'
 import { downloadCover } from './cover.js'
-import { cancelProduce, closeItem, dispatchOps, regenAsset, revealSaved, runProduce, saveProduced, setDesk, toast, useDesk, watchProduction } from './desk.js'
+import { cancelProduce, closeItem, dispatchOps, readWork, regenAsset, registerWorkFile, relinkWorkFile, revealSaved, runProduce, saveProduced, setDesk, toast, useDesk, watchProduction } from './desk.js'
 import { plural, t } from './i18n.js'
 import { NativeSessionButton } from './native-session.jsx'
 import { Icon, IconButton } from './ui.jsx'
@@ -18,10 +18,12 @@ function unescapeJson(text) {
   }
 }
 
-function AutoText({ value, onCommit, className, label, disabled }) {
+function AutoText({ value, content, onCommit, className, label, disabled }) {
   const [draft, setDraft] = React.useState(value ?? '')
   const ref = React.useRef(null)
-  React.useEffect(() => setDraft(value ?? ''), [value])
+  const editing = React.useRef(false)
+  const origin = React.useRef(null)
+  React.useEffect(() => { if (!editing.current) setDraft(value ?? '') }, [value])
   React.useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
@@ -30,7 +32,25 @@ function AutoText({ value, onCommit, className, label, disabled }) {
   }, [draft])
   return (
     <textarea ref={ref} rows={1} aria-label={label} className={className} value={draft} disabled={disabled}
-      onChange={e => setDraft(e.target.value)} onBlur={() => { if (draft.trim() && draft !== (value ?? '')) onCommit(draft) }} />
+      onFocus={() => {
+        if (!editing.current) origin.current = { value: value ?? '', version: content ? { revision: content.revision, sha256: content.sha256 } : null }
+        editing.current = true
+      }}
+      onChange={e => setDraft(e.target.value)} onBlur={async () => {
+        if (!editing.current) return
+        if (draft.trim() && draft !== origin.current.value) {
+          const applied = await onCommit(draft, origin.current.version)
+          if (applied === null) return
+        } else setDraft(value ?? '')
+        editing.current = false
+      }}
+      onKeyDown={event => {
+        if (event.key !== 'Escape') return
+        event.preventDefault()
+        editing.current = false
+        setDraft(value ?? '')
+        ref.current.blur()
+      }} />
   )
 }
 
@@ -91,7 +111,7 @@ function IdeaCard({ item, live, settings }) {
   return (
     <div className="md-idea-card">
       <span className="md-idea-label">{t('灵感')} · {fmtDate(item.createdAt)}</span>
-      <AutoText className="md-idea-text" label={t('灵感')} value={item.title} disabled={running} onCommit={title => dispatchOps([{ op: 'update_item', id: item.id, title }], { label: t('修改灵感'), silent: true })} />
+      <AutoText key={item.id} className="md-idea-text" label={t('灵感')} value={item.title} content={item.content} disabled={running || item.content && item.content.status !== 'ready'} onCommit={(title, version) => dispatchOps([{ op: 'update_item', id: item.id, title }], { label: t('修改灵感'), silent: true, expectedContent: version ? { [item.id]: version } : {} })} />
       {!running ? (
         <label className="md-style-pick">
           <span>{t('风格')}</span>
@@ -165,7 +185,7 @@ function HeroTile({ item, live, onView }) {
   return (
     <section className={`md-tile md-tile-hero ${running ? 'is-running' : ''}`}>
       <div className="md-hero-copy">
-        <AutoText className={`md-hero-title ${production ? '' : 'is-idle'}`} label={t('标题')} value={title} disabled={!done} onCommit={next => dispatchOps([{ op: 'update_production', id: item.id, title: next }], { label: t('修改标题'), silent: true })} />
+        <AutoText className={`md-hero-title ${production ? '' : 'is-idle'}`} label={t('标题')} value={title} content={item.content} disabled={!done} onCommit={(next, version) => dispatchOps([{ op: 'update_production', id: item.id, title: next }], { label: t('修改标题'), silent: true, expectedContent: version ? { [item.id]: version } : {} })} />
         <div className="md-hero-stats">
           {words ? <Stat icon="pen" value={words} unit={t('字', { s: plural(words, '', 's') })} /> : null}
           {shots.length ? <Stat icon="film" value={shots.length} unit={t('镜', { s: plural(shots.length, '', 's') })} /> : null}
@@ -240,14 +260,17 @@ function ArticleBody({ production, text, onView }) {
 function ArticleTile({ item, live, open, onToggle, onView, tileRef }) {
   const production = item.production
   const running = production?.status === 'running'
+  const content = item.content
+  const ready = !content || content.status === 'ready'
   const scroller = React.useRef(null)
-  const [editing, setEditing] = React.useState(false)
+  const [editor, setEditor] = React.useState(null)
+  const [saving, setSaving] = React.useState(false)
+  const [saveError, setSaveError] = React.useState(null)
   const [picked, setPicked] = React.useState(null)
-  const article = production?.article ?? ''
-  const [draft, setDraft] = React.useState(article)
-  React.useEffect(() => setDraft(article), [article])
-  const text = article || (live?.text ?? '').replace(/^\s*#\s+.*\n?/, '')
-  const streaming = running && !article
+  const article = content ? item.body ?? '' : production?.article ?? ''
+  const text = article || (ready ? live?.text ?? '' : '').replace(/^\s*#\s+.*\n?/, '')
+  const streaming = ready && running && !article
+  const changed = editor?.version && content && (editor.version.revision !== content.revision || editor.version.sha256 !== content.sha256)
   React.useEffect(() => {
     if (streaming && scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight
   }, [text, streaming])
@@ -255,14 +278,53 @@ function ArticleTile({ item, live, open, onToggle, onView, tileRef }) {
   React.useEffect(() => {
     if (article && scroller.current) scroller.current.scrollTop = 0
   }, [Boolean(article)]) // eslint-disable-line react-hooks/exhaustive-deps
-  const save = () => {
-    if (draft !== article) dispatchOps([{ op: 'update_production', id: item.id, article: draft }], { label: t('修改文章'), silent: true })
-    setEditing(false)
+  const reload = () => readWork(item.id).catch(err => toast(err.message, { error: true }))
+  const beginEdit = () => {
+    setEditor({ text: article, before: article, version: content ? { revision: content.revision, sha256: content.sha256 } : null })
+    setSaveError(null)
+    setPicked(null)
+  }
+  const cancelEdit = () => {
+    setEditor(null)
+    setSaveError(null)
+    reload()
+  }
+  const save = async () => {
+    if (!editor || saving) return
+    setSaving(true)
+    setSaveError(null)
+    try {
+      if (editor.text !== editor.before) await dispatchOps([content
+        ? { op: 'update_item', id: item.id, body: editor.text }
+        : { op: 'update_production', id: item.id, article: editor.text }], {
+        label: content ? t('修改正文') : t('修改文章'),
+        expectedContent: editor.version ? { [item.id]: editor.version } : {}, throwOnError: true,
+      })
+      setEditor(null)
+    } catch (err) {
+      setSaveError(err.message)
+    } finally { setSaving(false) }
   }
   const copy = async () => {
     await navigator.clipboard.writeText(article)
-    toast(t('脚本已复制'))
+    toast(content ? t('正文已复制') : t('脚本已复制'))
   }
+  const fileDialog = () => setDesk({ dialog: {
+    title: content ? t('重新关联作品文件') : t('登记作品文件'),
+    submitLabel: content ? t('重新关联') : t('登记'),
+    initial: { relativePath: content?.relativePath ?? `works/${item.id}-${item.language ?? 'und'}.md`, language: content?.language ?? item.language ?? 'und' },
+    fields: [
+      { name: 'identity', type: 'hidden', label: t('作品身份：{id}', { id: item.id }) },
+      ...(content ? [
+        { name: 'root', type: 'hidden', label: t('Notes 目录：{path}', { path: content.notesRoot }) },
+        { name: 'language', type: 'hidden', label: t('作品语言：{language}', { language: content.language }) },
+      ] : [{ name: 'language', type: 'select', label: t('作品语言'), required: true, options: [
+        { value: 'zh', label: t('中文') }, { value: 'en', label: t('英文') }, { value: 'und', label: t('未知语言（und）') },
+      ] }]),
+      { name: 'relativePath', label: t('作品文件'), required: true, hint: t('填写作品所属 Notes 目录中的 works/*.md 路径，文件头的身份和语言须与此作品一致') },
+    ],
+    onSubmit: values => content ? relinkWorkFile(item.id, values.relativePath.trim()) : registerWorkFile(item.id, values.language, values.relativePath.trim()),
+  } })
   // 选中一段，交给助手改
   const onMouseUp = () => {
     const selection = window.getSelection()
@@ -279,23 +341,34 @@ function ArticleTile({ item, live, open, onToggle, onView, tileRef }) {
   return (
     <>
       <header className="md-tile-head">
-        <h2>{t('脚本')}</h2>
+        <h2>{content ? t('正文') : t('脚本')}</h2>
         <span className="md-grow" />
-        {article ? (
+        <IconButton icon="link" label={content ? t('重新关联作品文件') : t('登记作品文件')} disabled={saving} onClick={fileDialog} />
+        {content ? <IconButton icon="refresh" label={t('重新读取正文')} disabled={saving || Boolean(editor)} onClick={reload} /> : null}
+        {editor ? (
           <>
-            {editing ? <button type="button" className="md-btn is-small" onClick={save}><Icon name="check" size={13} />{t('完成')}</button> : <IconButton icon="edit" label={t('直接修改')} onClick={() => setEditing(true)} />}
-            <IconButton icon="copy" label={t('复制脚本')} onClick={copy} />
+            <IconButton icon="close" label={t('取消修改并重新读取')} disabled={saving} onClick={cancelEdit} />
+            <button type="button" className="md-btn is-small" disabled={saving} onClick={save}><Icon name="check" size={13} />{saving ? t('保存中…') : t('保存')}</button>
+          </>
+        ) : ready && (content || article) ? (
+          <>
+            <IconButton icon="edit" label={t('直接修改')} onClick={beginEdit} />
+            <IconButton icon="copy" label={content ? t('复制正文') : t('复制脚本')} onClick={copy} />
             <IconButton icon={open ? 'close' : 'expand'} label={open ? t('收起') : t('放大阅读')} onClick={onToggle} />
           </>
         ) : null}
       </header>
-      {editing ? (
-        <textarea className="md-article-edit" aria-label={t('脚本')} value={draft} onChange={e => setDraft(e.target.value)} onBlur={save} />
+      {content ? <div className="md-note-reference"><span title={content.notesRoot}>{content.relativePath}</span><span>{t('版本 {n}', { n: content.revision })}</span></div> : null}
+      {content && !ready ? <div className="md-note-status" role="alert"><p className="md-setup-note is-error">{content.error}</p><button type="button" className="md-link-btn" onClick={fileDialog}>{t('重新关联作品文件')}</button></div> : null}
+      {saveError || changed ? <div className="md-note-status" role="alert"><p className="md-setup-note is-error">{saveError || t('作品已有新版本，当前修改仍保留。请取消修改并重新读取')}</p></div> : null}
+      {streaming && content ? <p className="md-note-status md-muted">{t('生成预览，尚未保存')}</p> : null}
+      {editor ? (
+        <textarea className="md-article-edit" aria-label={content ? t('正文') : t('脚本')} value={editor.text} disabled={saving} onChange={e => setEditor(current => ({ ...current, text: e.target.value }))} />
       ) : text ? (
         <div className="md-article-scroll" ref={scroller} onMouseUp={onMouseUp} onScroll={() => setPicked(null)}>
           {open ? <ArticleBody production={production} text={text} onView={onView} /> : <div className="md-prose" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />}
         </div>
-      ) : (
+      ) : content ? ready && <p className="md-note-status md-muted">{t('正文为空，点击直接修改开始写作')}</p> : (
         <div className={`md-skeleton ${running ? '' : 'is-still'}`} aria-hidden="true">{Array.from({ length: 12 }, (_, i) => <i key={i} />)}</div>
       )}
       {picked ? (
@@ -497,7 +570,7 @@ export function Studio({ openSession }) {
   const ref = React.useRef(null)
   const production = item?.production
   const running = production?.status === 'running'
-  const watching = running || [production?.cover, ...(production?.images ?? []), ...(production?.shots ?? [])].some(isBusy)
+  const watching = Boolean(item?.content) || running || [production?.cover, ...(production?.images ?? []), ...(production?.shots ?? [])].some(isBusy)
 
   React.useEffect(() => {
     if (id && watching) return watchProduction(id)

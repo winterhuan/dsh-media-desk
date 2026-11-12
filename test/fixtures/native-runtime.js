@@ -22,22 +22,34 @@ const profile = 'media-desk-test'
 export async function nativeRuntime(t, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'media-desk-native-'))
   const wiki = join(root, 'wiki')
-  const home = join(root, 'home')
+  const home = options.env?.DSH_HOME ?? join(root, 'home')
   const agents = join(root, 'agents')
   const telemetryPath = join(root, 'model-requests.jsonl')
   const overlay = join(root, 'overlay.json')
   const env = { ...process.env, DSH_HOME: home, DSH_AGENTS_HOME: agents, WIKI_PATH: wiki, ...options.env }
-  let child, exited, cookie, baseUrl
+  let child, exited, stopping, cookie, baseUrl
   const connections = new Set()
   let log = ''
-  const stop = async () => {
-    await Promise.all([...connections].map(close => close()))
-    if (!child) return
-    const current = child
-    child = undefined
-    current.kill('SIGTERM')
-    const deadline = setTimeout(() => current.kill('SIGKILL'), 8000)
-    try { await exited } finally { clearTimeout(deadline) }
+  const stop = (signal = 'SIGTERM') => {
+    if (stopping) {
+      if (signal === 'SIGKILL') child?.kill(signal)
+      return stopping
+    }
+    stopping = (async () => {
+      await Promise.all([...connections].map(close => close()))
+      if (!child) return
+      const current = child
+      let timedOut = false
+      current.kill(signal)
+      const deadline = setTimeout(() => { timedOut = true; current.kill('SIGKILL') }, options.stopTimeoutMs ?? 8000)
+      try { return { ...await exited, timedOut } } finally {
+        clearTimeout(deadline)
+        child = undefined
+      }
+    })()
+    const completion = stopping
+    completion.then(() => { if (stopping === completion) stopping = undefined }, () => { if (stopping === completion) stopping = undefined })
+    return completion
   }
   t.after(async () => {
     await stop()
@@ -51,7 +63,7 @@ export async function nativeRuntime(t, options = {}) {
   await dsh('plugin', '--profile', profile, 'add', 'link:' + repository)
 
   const start = async (patch = [], environment = {}) => {
-    if (child) throw new Error('Stop the fixture before restarting it')
+    if (child || stopping) throw new Error('Stop the fixture before restarting it')
     await writeFile(overlay, JSON.stringify([
       { id: 'agent-default-model', config: { provider: 'media-desk-fixture', model: 'native-fixture' } },
       { id: 'workspace-controller', config: { documentsDirectory: join(root, 'documents') } },
@@ -98,13 +110,14 @@ export async function nativeRuntime(t, options = {}) {
     await login.arrayBuffer()
     return baseUrl
   }
-  const host = async (path, body) => {
+  const host = async (path, body, headers = {}) => {
     const response = await fetch(baseUrl + '/media-desk/' + path, {
       method: body === undefined ? 'GET' : 'POST',
-      headers: { cookie, 'content-type': 'application/json' },
+      headers: { cookie, 'content-type': 'application/json', ...headers },
       body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(60000),
     })
-    return { status: response.status, value: await response.json() }
+    const text = await response.text()
+    return { status: response.status, value: text ? JSON.parse(text) : null }
   }
   const rpc = async (endpoint, args) => {
     const response = await fetch(baseUrl + '/api/' + endpoint, {

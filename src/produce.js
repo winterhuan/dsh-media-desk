@@ -138,7 +138,7 @@ export class Producer {
   /**
    * @param {{store: object, settings: object, callText: Function, generate: Function, ready?: Function}} deps - 存储、设置、文本模型和生图函数。
    */
-  constructor({ store, settings, callText, generate, ready = imageReady }) {
+  constructor({ store, settings, callText, generate, ready = imageReady, onError }) {
     this.store = store
     this.settings = settings
     this.callText = callText
@@ -146,6 +146,25 @@ export class Producer {
     this.ready = ready
     this.jobs = new Map()
     this.assets = new Set()
+    this.pending = new Set()
+    this.assetControllers = new Map()
+    this.closing = false
+    this.onError = onError
+  }
+
+  launch(task) {
+    const operation = this.store.owner ? this.store.owner.track(task) : Promise.resolve().then(task)
+    this.pending.add(operation)
+    operation.then(() => this.pending.delete(operation), error => { this.pending.delete(operation); this.onError?.(error) })
+    return operation
+  }
+
+  /** Stop new production, abort owned text/images, and await their final storage writes. */
+  async close() {
+    this.closing = true
+    for (const job of this.jobs.values()) job.controller.abort()
+    for (const controller of this.assetControllers.values()) controller.abort()
+    while (this.pending.size) await Promise.allSettled([...this.pending])
   }
 
   isRunning(id) {
@@ -166,28 +185,39 @@ export class Producer {
     }
   }
 
-  patch(id, mutate) {
+  patch(id, mutate, expectedContent = {}) {
     return this.store.mutate('成稿', (state) => {
       const item = state.items.find(row => row.id === id)
       if (item?.production) mutate(item.production, item)
       return state
-    }, { undoable: false })
+    }, { undoable: false, expectedContent })
   }
 
   async start(id) {
+    if (this.closing) throw Object.assign(new Error(tr('Media Desk 正在关闭，请稍后重试')), { status: 503 })
     if (this.jobs.has(id)) return false
     const state = await this.store.read()
     const item = state.items.find(row => row.id === id)
+    if (this.closing) throw Object.assign(new Error(tr('Media Desk 正在关闭，请稍后重试')), { status: 503 })
     if (!item) throw Object.assign(new Error(tr('找不到这条灵感')), { status: 404 })
+    if (item.content && item.content.status !== 'ready') throw Object.assign(new Error(item.content.error), { code: item.content.code, status: 409 })
+    if (this.jobs.has(id)) return false
     const job = { stage: 'brief', text: '', planText: '', controller: new AbortController() }
     this.jobs.set(id, job)
-    await this.store.mutate('开始成稿', (draft) => {
-      const target = draft.items.find(row => row.id === id)
-      target.production = { status: 'running', stage: 'brief', startedAt: new Date().toISOString(), title: target.title, article: '', cover: null, images: [], shots: [] }
-      return draft
-    }, { undoable: false })
+    try {
+      await this.store.mutate('开始成稿', (draft) => {
+        const target = draft.items.find(row => row.id === id)
+        if (!target) throw Object.assign(new Error(tr('找不到这条灵感')), { status: 404 })
+        target.production = { status: 'running', stage: 'brief', startedAt: new Date().toISOString(), title: target.title, current: Boolean(target.content), article: target.content ? target.body : '', cover: null, images: [], shots: [] }
+        return draft
+      }, { undoable: false, expectedContent: item.content ? { [id]: item.content } : {} })
+    } catch (error) {
+      this.jobs.delete(id)
+      throw error
+    }
     // 不等待：浏览器靠轮询拿进度
-    this.run(id, job).catch(() => {}).finally(() => this.jobs.delete(id))
+    const completion = this.launch(() => this.run(id, job))
+    completion.then(() => this.jobs.delete(id), () => this.jobs.delete(id))
     return true
   }
 
@@ -202,6 +232,7 @@ export class Producer {
       const state = await this.store.read()
       const item = state.items.find(row => row.id === id)
       const snapshot = JSON.parse(JSON.stringify(state))
+      const expectedContent = item.content ? { [id]: item.content } : {}
 
       signal.throwIfAborted()
       const backup = normalizePlan(fallbackPlan(item, '', settings), settings, item.title)
@@ -222,6 +253,7 @@ export class Producer {
       const ready = this.ready(settings)
       const initial = ready ? 'pending' : 'skipped'
       job.stage = 'making'
+      signal.throwIfAborted()
       await this.patch(id, (production) => {
         production.stage = 'making'
         production.title = plan.title
@@ -253,12 +285,13 @@ export class Producer {
           notice = tr('没有连上文字模型，先给你一份结构草稿。可以到 DeepSeek Harness 设置里检查模型。')
         }
         const { article } = splitTitle(markdown, plan.title)
+        signal.throwIfAborted()
         await this.patch(id, (production) => {
           production.article = article
           production.aiArticle = article
           production.engine = engine
           production.notice = notice
-        })
+        }, expectedContent)
       }
 
       const tasks = [writeArticle()]
@@ -328,13 +361,19 @@ export class Producer {
     try {
       const { buffer, ext } = await this.generateWithRetry(settings.image, prompt, signal)
       const name = `${newId('g')}${ext}`
-      await writeFile(join(this.store.filesDir, name), buffer)
-      await this.patch(id, (production) => {
-        const asset = assetAt(production, target)
-        if (!asset) return
-        asset.status = 'done'
-        asset.src = `media-desk/files/${name}`
-      })
+      const publish = async () => {
+        signal?.throwIfAborted()
+        await writeFile(join(this.store.filesDir, name), buffer)
+        signal?.throwIfAborted()
+        await this.patch(id, (production) => {
+          const asset = assetAt(production, target)
+          if (!asset) return
+          asset.status = 'done'
+          asset.src = `media-desk/files/${name}`
+        })
+      }
+      if (this.store.owner) await this.store.owner.run(publish)
+      else await publish()
     } catch (err) {
       if (signal?.aborted) return
       await this.patch(id, (production) => {
@@ -348,6 +387,7 @@ export class Producer {
 
   /** 单独重画一张。 */
   async regenerate(id, target) {
+    if (this.closing) throw Object.assign(new Error(tr('Media Desk 正在关闭，请稍后重试')), { status: 503 })
     const settings = await this.settings.read()
     if (!this.ready(settings)) throw Object.assign(new Error(tr('还没有接入生图模型')), { status: 400 })
     if (!parseTarget(target)) throw Object.assign(new Error(tr('目标无效')), { status: 400 })
@@ -355,10 +395,15 @@ export class Producer {
     if (this.assets.has(key)) return
     const state = await this.store.read()
     const production = state.items.find(row => row.id === id)?.production
+    if (this.closing) throw Object.assign(new Error(tr('Media Desk 正在关闭，请稍后重试')), { status: 503 })
     if (!production || !assetAt(production, target)) throw Object.assign(new Error(tr('找不到这张图')), { status: 404 })
     this.assets.add(key)
+    const controller = new AbortController()
+    this.assetControllers.set(key, controller)
     await this.patch(id, (next) => { assetAt(next, target).status = 'running' })
-    this.renderAsset(id, target, settings).catch(() => {}).finally(() => this.assets.delete(key))
+    const completion = this.launch(() => this.renderAsset(id, target, settings, controller.signal))
+    const done = () => { this.assets.delete(key); this.assetControllers.delete(key) }
+    completion.then(done, done)
   }
 
   /** Host 重启后，没人在跑的「进行中」不能一直转圈。 */

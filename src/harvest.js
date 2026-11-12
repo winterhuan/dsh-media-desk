@@ -62,12 +62,13 @@ function followerHint(text) {
   return Number.isFinite(value) ? Math.round(value) : null
 }
 
-async function fetchPublic(raw, fetchImpl) {
+async function fetchPublic(raw, fetchImpl, signal) {
   let current = raw
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
     const url = await assertPublicUrl(current)
+    signal?.throwIfAborted()
     const res = await fetchImpl(url, {
-      redirect: 'manual', signal: AbortSignal.timeout(TIMEOUT_MS),
+      redirect: 'manual', signal: AbortSignal.any([AbortSignal.timeout(TIMEOUT_MS), ...(signal ? [signal] : [])]),
       headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36', accept: 'text/html,application/xhtml+xml', 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' },
     })
     if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
@@ -79,8 +80,8 @@ async function fetchPublic(raw, fetchImpl) {
   throw new Error(tr('跳转次数过多'))
 }
 
-async function readHtml(raw, fetchImpl) {
-  const { res, url } = await fetchPublic(raw, fetchImpl)
+async function readHtml(raw, fetchImpl, signal) {
+  const { res, url } = await fetchPublic(raw, fetchImpl, signal)
   if (!res.ok) throw new Error(tr('页面返回 {status}，可能需要登录或被平台拦截', { status: res.status }))
   const type = res.headers.get('content-type') || ''
   if (!/html|xml/i.test(type)) throw new Error(tr('这不是网页（{type}）', { type: type || tr('未知类型') }))
@@ -103,8 +104,8 @@ async function readHtml(raw, fetchImpl) {
  * @param {typeof fetch} [fetchImpl] - 便于测试替换。
  * @returns {Promise<{url: string, title: string|null, text: string}>} 页面文字。
  */
-export async function harvestText(raw, fetchImpl = fetch) {
-  const { html, url } = await readHtml(raw, fetchImpl)
+export async function harvestText(raw, fetchImpl = fetch, signal) {
+  const { html, url } = await readHtml(raw, fetchImpl, signal)
   const title = meta(html, ['og:title']) ?? decodeEntities(/<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1] ?? '')
   const body = html
     .replace(/<(script|style|noscript|svg|nav|footer|header|aside)\b[\s\S]*?<\/\1>/gi, ' ')
@@ -121,8 +122,8 @@ export async function harvestText(raw, fetchImpl = fetch) {
  * @param {typeof fetch} [fetchImpl] - 便于测试替换。
  * @returns {Promise<{url: string, title: string|null, description: string|null, image: string|null, siteName: string|null, followers: number|null}>} 页面信息。
  */
-export async function harvest(raw, fetchImpl = fetch) {
-  const { html, url } = await readHtml(raw, fetchImpl)
+export async function harvest(raw, fetchImpl = fetch, signal) {
+  const { html, url } = await readHtml(raw, fetchImpl, signal)
   const title = meta(html, ['og:title', 'twitter:title']) ?? decodeEntities(/<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1] ?? '')
   const description = meta(html, ['og:description', 'description', 'twitter:description'])
   let image = meta(html, ['og:image', 'twitter:image', 'og:image:url'])
