@@ -509,10 +509,6 @@ button.md-stamp:not(:disabled):hover { transform: scale(1.08) rotate(-2deg); }
 .md-model-alert { margin-bottom: 12px; padding: 10px 12px; border-radius: var(--r-md); background: color-mix(in srgb, #d39a2c 12%, transparent); font-size: 12.5px; line-height: 18px; }
 .md-model-alert strong { display: block; font-weight: 600; }
 .md-model-alert p { margin-top: 4px; color: var(--ink2); overflow-wrap: anywhere; }
-.md-chat-receipts { flex: none; padding: 0 12px 12px; max-height: 160px; overflow-y: auto; }
-.md-receipt { display: flex; align-items: flex-start; gap: 7px; width: 100%; margin-top: 6px; padding: 7px 10px; border-radius: var(--r-md); background: var(--card); box-shadow: var(--dsw-elevation-soft); font-size: 12.5px; line-height: 19px; transition: transform .25s var(--ease); }
-button.md-receipt:hover { transform: translateX(2px); }
-.md-receipt-check { flex: none; display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-top: 1.5px; border-radius: 50%; corner-shape: round; background: var(--primary); color: var(--on-primary); }
 .md-msg footer { display: flex; align-items: center; gap: 10px; margin-top: 6px; color: var(--ink4); font-size: 11px; line-height: 16px; }
 .md-msg footer button { display: inline-flex; align-items: center; gap: 3px; color: var(--ink3); }
 .md-msg footer button:hover { color: var(--ink); }

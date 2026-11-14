@@ -27,7 +27,7 @@ Install the fixed Git release into a separate DSH `0.2.2-rc.1` Web profile and o
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.4
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.5
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
@@ -36,7 +36,7 @@ Open Media Desk in the sidebar. The package includes its Host entry and browser 
 <a id="native-conversations"></a>
 ### Native conversations
 
-The embedded assistant renders the ordinary DSH conversation with native input, model selection, tool history, questions and approvals. Up to four recent accepted work receipts from the bound conversation appear beside it; select a receipt to open its work. **Global native session** and **Native session** also open that same Session in the workspace. A new work Session uses the work's title; the global Session has a separate assistant title. Starting a new conversation stops active work and preserves settled scripts and media. Native renames are preserved. Closing the workbench or restarting DSH preserves the associated Session; reopen it from the workbench or native workspace tree.
+The embedded assistant renders the ordinary DSH conversation with native input, model selection, tool history, questions and approvals. **Global native session** and **Native session** open that same Session in the workspace. A new work Session uses the work's title; the global Session has a separate assistant title. Starting a new conversation stops active work and preserves settled scripts and media. Native renames are preserved. Closing the workbench or restarting DSH preserves the associated Session; reopen it from the workbench or native workspace tree.
 
 A new association uses the existing `WIKI_PATH` directory, or `~/wiki` when unset. Host configuration `wikiPath` overrides that choice. The Wiki determines the workspace and `<Wiki>/notes` root; a registered work uses its saved Wiki even for its first Session. Saved work and Session roots survive an environment change, including a symlinked Notes directory. Missing saved Wiki directories are not rebuilt. Changing the native workspace or preset requires restoring the bound Wiki and Media Desk preset before opening it from the workbench again.
 

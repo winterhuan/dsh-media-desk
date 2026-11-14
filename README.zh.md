@@ -27,7 +27,7 @@ kind: "package-bundle"
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.4
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.5
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
@@ -36,7 +36,7 @@ dsh --profile media-desk-dev --port 0 --no-open
 <a id="native-conversations"></a>
 ### 原生会话
 
-内嵌助手显示 DSH 普通会话，提供原生输入、模型选择、工具历史、问答和批准。旁边显示当前关联会话最近的至多四条已接受作品回执，点击回执可打开对应作品。**全局原生会话**与**原生会话**入口也会在工作区打开同一个 Session。新作品 Session 使用作品标题；全局 Session 使用独立的助手标题。开始新对话会停止活动工作，保留已结算的脚本与媒体。原生重命名会保留。关闭工作台或重启 DSH 后仍保留关联的 Session，可以从工作台或原生工作区树重新打开。
+内嵌助手显示 DSH 普通会话，提供原生输入、模型选择、工具历史、问答和批准。**全局原生会话**与**原生会话**入口会在工作区打开同一个 Session。新作品 Session 使用作品标题；全局 Session 使用独立的助手标题。开始新对话会停止活动工作，保留已结算的脚本与媒体。原生重命名会保留。关闭工作台或重启 DSH 后仍保留关联的 Session，可以从工作台或原生工作区树重新打开。
 
 新关联使用现有的 `WIKI_PATH` 目录，未设置时使用 `~/wiki`。Host 配置 `wikiPath` 覆盖该选择。Wiki 同时确定工作区和 `<Wiki>/notes` 根目录；已登记作品的首个 Session 也沿用作品保存的 Wiki。环境变化后，作品和 Session 保留各自保存的根目录，包括使用符号链接的 Notes 目录。缺失的已保存 Wiki 不会被重建。修改原生工作区或 preset 后，需要恢复绑定的 Wiki 和 Media Desk preset，才能再次从工作台打开。
 

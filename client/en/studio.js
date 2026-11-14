@@ -1,7 +1,5 @@
 // 英文词典（studio）。key 是中文原文，value 是英文。
 export const STUDIO = {
-  '已接受的修改': 'Accepted changes',
-  '查看已接受作品：{title}': 'View accepted work: {title}',
   '请在对话中批准或拒绝操作': 'Approve or reject the operation in the conversation',
   '请在对话中回答问题': 'Answer the question in the conversation',
   '恢复保存与迁移': 'Recover saves and migrate',
