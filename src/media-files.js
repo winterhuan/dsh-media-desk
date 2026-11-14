@@ -2,8 +2,9 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, lstat, readFile, readdir, unlink } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { mediaPath } from './notes-paths.js'
 
 const fingerprint = bytes => createHash('sha256').update(bytes).digest('hex')
 const failure = message => Object.assign(new Error(message), { code: 'media/save-conflict', status: 409 })
@@ -26,7 +27,8 @@ export class MediaFiles {
       const record = JSON.parse(bytes)
       if (record.version !== 1 || record.id !== id || !/^[a-f0-9]{64}$/.test(record.sha256) || !['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(record.ext)
         || typeof record.workId !== 'string' || typeof record.notesRoot !== 'string' || typeof record.target !== 'string'
-        || record.relativePath !== `assets/${encodeURIComponent(record.workId)}/${id}${record.ext}`) throw failure('Invalid saved media record')
+        || !/^assets\/[^/\\]+\/[^/\\]+$/.test(record.relativePath) || !record.relativePath.endsWith(record.ext)
+        || /[\u0000-\u001f]/.test(record.relativePath) || record.relativePath.split('/').some(part => part === '.' || part === '..')) throw failure('Invalid saved media record')
       records.push(record)
     }
     return records
@@ -50,7 +52,7 @@ export class MediaFiles {
       const id = randomUUID()
       const record = { version: 1, id, workId, target, notesRoot: work.content.notesRoot, language: work.content.language,
         attemptId: expected.attemptId ?? null, renderId: expected.renderId, sha256: fingerprint(buffer), ext,
-        phase: 'candidate', createdAt: new Date().toISOString(), relativePath: `assets/${encodeURIComponent(workId)}/${id}${ext}` }
+        phase: 'candidate', createdAt: new Date().toISOString(), relativePath: mediaPath(work, target, ext, id) }
       await writeFileAtomic(join(this.root, id, 'candidate' + ext), buffer, { mode: 0o600, dirMode: 0o700 })
       await writeFileAtomic(join(this.root, id, 'pending.json'), JSON.stringify(record), { mode: 0o600, dirMode: 0o700 })
       try { return await this.retry(id) } catch (error) { throw Object.assign(error, { mediaPendingId: id }) }
@@ -91,7 +93,7 @@ export class MediaFiles {
       const candidate = await readFile(join(this.root, id, 'candidate' + record.ext))
       if (fingerprint(candidate) !== record.sha256) throw failure('Retained media bytes have changed')
       const target = join(record.notesRoot, record.relativePath)
-      await this.store.notes.createDirectory(record.notesRoot, `assets/${encodeURIComponent(record.workId)}`)
+      await this.store.notes.createDirectory(record.notesRoot, dirname(record.relativePath))
       try { await copyFile(join(this.root, id, 'candidate' + record.ext), target, constants.COPYFILE_EXCL) } catch (error) {
         if (error.code !== 'EEXIST') throw error
         if ((await lstat(target)).isSymbolicLink() || fingerprint(await readFile(target)) !== record.sha256) throw failure('Notes media destination has changed')
@@ -179,7 +181,7 @@ export class MediaFiles {
         const renderId = 'migration:' + id
         const record = { version: 1, id, workId, target, language: version.content.language, notesRoot: version.content.notesRoot,
           attemptId: version.production.attemptId ?? null, renderId, sha256: fingerprint(bytes), ext, phase: 'candidate',
-          createdAt: new Date().toISOString(), backupId: backup.id, relativePath: `assets/${encodeURIComponent(workId)}/${id}${ext}` }
+          createdAt: new Date().toISOString(), backupId: backup.id, relativePath: mediaPath(version, target, ext, id) }
         await writeFileAtomic(join(this.root, id, 'candidate' + ext), bytes, { mode: 0o600, dirMode: 0o700 })
         await writeFileAtomic(join(this.root, id, 'pending.json'), JSON.stringify(record), { mode: 0o600, dirMode: 0o700 })
         await this.store.mutate('迁移已接受媒体', draft => {

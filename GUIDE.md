@@ -54,18 +54,24 @@ Configure image count, storyboard count and an image source in Settings. The HTT
 
 Host tool policy and current subscription-tool preferences apply to background images. A call needing unsupported approval fails; it does not inherit the visible Session’s restrictions or account affinity. Tool failures have no automatic HTTP fallback or additional tool retry. A pure Code Mode/PTC executor cannot directly call this root image tool. HTTP rate-limit retries remain bounded within one image attempt.
 
-Without an image service, accepted script and storyboard descriptions remain useful. A failed image preserves the accepted script and other assets; redraw that image independently. Accepted bytes live once under `notes/assets/<work-id>/`. A retained save failure can be retried after repairing storage, without generating again.
+Without an image service, accepted script and storyboard descriptions remain useful. A failed image preserves the accepted script and other assets; redraw that image independently. Accepted bytes live once under `notes/assets/<work-title>/`. Files use names such as `cover.jpg`, `image-01.jpg` and `shot-01.jpg`; redraws receive a short suffix. A retained save failure can be retried after repairing storage, without generating again.
 
 **Save** creates a fresh export folder every time, containing the accepted script, storyboard, available images, optional composed video cover, `sources.md` and `manifest.json`. Sources remain separate from spoken text. The manifest identifies the content snapshot, image fingerprints and missing assets. A new plan without its accepted script cannot mix with an old script in an export. Exports with the same title never reuse old folders or files.
 
 <a id="notes-recovery"></a>
 ## Notes recovery
 
-The **Body** tile edits `notes/works/<work-id>-<language>.md` directly. Titles can change without renaming that file. **Work language** switches retained language versions. Materials use `notes/materials/`; custom voice, styles and rules use `notes/preferences/`; fixed AI originals and earlier formats use `notes/history/<work-id>/`. `notes/index.md` provides managed navigation while retaining unrelated prose.
+The **Body** tile edits `notes/works/<title>.md` directly. Titles can change without renaming that file. **Work language** switches retained language versions. Materials use `notes/materials/`; custom voice, styles and rules use `notes/preferences/`; fixed AI originals and earlier formats use `notes/.media-desk/history/<work-id>/`. `notes/index.md` provides managed navigation while retaining unrelated prose.
 
-External byte changes are checked on reads and before acceptance. **Relink work file** accepts a regular owned work file with the same identity and language. For a save failure, repair the reported location or permission, then retry the retained native or media candidate in the recovery dialog. Retry returns an existing receipt when acceptance already succeeded. A stopped or superseded candidate cannot be accepted.
+Recent history and undo each retain five entries. Current drafts, referenced originals, active candidates and editor conflicts remain available. Identical frozen snapshots reuse a file. External byte changes are checked on reads and before acceptance. **Relink work file** accepts a regular owned work file with the same identity and language. For a save failure, repair the reported location or permission, then retry the retained native or media candidate in the recovery dialog. Retry returns an existing receipt when acceptance already succeeded. A stopped or superseded candidate cannot be accepted.
 
 For a version conflict, review the current body and retained external version, then keep the current body or adopt the repaired external version. Both versions and the candidate remain available. Refresh if the file changes again. Undo targets the original accepted edit’s language, preserves later disjoint edits and reports overlapping conflicts without lowering versions.
+
+To organize existing ID filenames and visible history, stop DSH and run the following from this package with the stopped home and Wiki paths. The command creates and verifies a private backup, moves files and updates their references. Keep this package version when restarting; older packages cannot read the renamed media safely.
+
+```sh
+node scripts/organize-notes.mjs "$DSH_HOME" "$WIKI_PATH"
+```
 
 For offline rollback, stop the selected DSH writer. In the built checkout, set `DSH_HOME`, `WIKI_PATH` and `MEDIA_DESK_MIGRATION_ID` to the stopped profile’s home, Wiki and verified backup ID, then run:
 

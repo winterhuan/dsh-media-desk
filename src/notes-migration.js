@@ -1,5 +1,7 @@
 /** Verified work-migration backups and rollback evidence remain outside the shared Wiki. */
 import { createHash, randomUUID } from 'node:crypto'
+import { historyDirectory } from './notes-paths.js'
+import { requiredHistory } from './notes-history.js'
 import { constants } from 'node:fs'
 import { copyFile, link, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -106,6 +108,8 @@ export class NotesMigration {
     await retain(this.store.file, 'state.json', state)
     for (const name of ['settings.json', 'sessions.json']) await retain(join(this.store.root, name), name, await optional(join(this.store.root, name)))
     const registered = references(original)
+    await this.store.writes.load()
+    const required = await requiredHistory(this.store)
     for (const directory of ['files', 'notes-writes', 'media-writes', 'native-candidates', 'native-settings']) for (const source of await files(join(this.store.root, directory))) {
       const saved = source.slice(this.store.root.length + 1).split('\\').join('/')
       const bytes = await optional(source)
@@ -121,6 +125,7 @@ export class NotesMigration {
     for (const [source, reference] of registered) {
       try { await retain(source, `notes/${roots.indexOf(reference.notesRoot)}/${reference.relativePath}`, await this.store.notes.readBytes(reference, { binary: reference.relativePath.startsWith('assets/') }), reference.relativePath.startsWith('assets/') ? 'media' : 'notes') }
       catch (error) {
+        if (error.code === 'notes/missing' && /^(?:\.media-desk\/)?history\//.test(reference.relativePath) && !required.has(source)) continue
         if (!retainMissing || error.code !== 'notes/missing') throw error
         manifest.missingSources ??= []
         manifest.missingSources.push(source)
@@ -141,6 +146,10 @@ export class NotesMigration {
   async rollback(id) {
     const backup = await this.load(id)
     await this.verify(backup)
+    const registered = references(JSON.parse(await readFile(join(backup.path, 'state.json'), 'utf8')))
+    for (const entry of backup.entries.filter(entry => entry.kind === 'data' && /^notes-writes\/[^/]+\/(?:proposal|pending)\.json$/.test(entry.saved))) {
+      references(JSON.parse(await readFile(join(backup.path, entry.saved), 'utf8')), registered)
+    }
     const root = dirname(backup.path)
     const marker = join(root, 'rollback.json')
     const completed = await optional(marker)
@@ -166,9 +175,9 @@ export class NotesMigration {
       if (!present.isFile()) throw failure(tr('回滚来源必须是普通文件：{path}', { path: source }))
       let target = join(live, saved + '.' + randomUUID())
       if (entry?.kind === 'notes') {
-        const reference = [...references(JSON.parse(await readFile(join(backup.path, 'state.json'), 'utf8'))).values()].find(reference => join(reference.notesRoot, reference.relativePath) === source)
+        const reference = registered.get(source)
         const { metadata } = this.store.notes.decode(await readFile(join(backup.path, entry.saved)))
-        const directory = `history/${encodeURIComponent(metadata.workId ?? metadata.id ?? id)}`
+        const directory = historyDirectory(metadata.workId ?? metadata.id ?? id)
         await this.store.notes.createDirectory(reference.notesRoot, directory)
         target = join(reference.notesRoot, directory, randomUUID() + '-rollback-external.md')
         pending.liveNotes ??= []
@@ -205,7 +214,7 @@ export class NotesMigration {
     for (const name of ['settings.json', 'sessions.json']) if (!names.has(name)) await capture(join(this.store.root, name), name)
     for (const entry of dataEntries.filter(entry => entry.saved !== 'state.json')) await restore(entry, join(this.store.root, entry.saved), entry.saved)
     for (const entry of backup.entries.filter(entry => ['notes', 'media'].includes(entry.kind))) {
-      const reference = [...references(JSON.parse(await readFile(join(backup.path, 'state.json'), 'utf8'))).values()].find(reference => join(reference.notesRoot, reference.relativePath) === entry.source)
+      const reference = registered.get(entry.source)
       if (!reference || !this.store.notes.roots.has(reference.notesRoot)) continue
       await this.store.notes.createDirectory(reference.notesRoot, reference.relativePath.split('/').slice(0, -1).join('/'))
       await restore(entry, entry.source, entry.saved)

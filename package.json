@@ -1,6 +1,6 @@
 {
   "name": "@winterhuan/dsh-media-desk",
-  "version": "2.7.0-winter.2",
+  "version": "2.7.0-winter.3",
   "description": "DeepSeek Harness 插件。一句话记灵感，一键成稿：口播脚本、标题、视频封面、配图和黑白线稿分镜。",
   "type": "module",
   "packageManager": "pnpm@11.7.0",
@@ -90,6 +90,7 @@
     "LICENSE",
     "README.zh.md",
     "GUIDE.md",
-    "GUIDE.zh.md"
+    "GUIDE.zh.md",
+    "scripts/organize-notes.mjs"
   ]
 }

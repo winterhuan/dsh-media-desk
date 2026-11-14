@@ -14,6 +14,8 @@ import { readUndoChanges, undoValue } from './notes-undo.js'
 import { NotesMigration } from './notes-migration.js'
 import { LANGUAGE_FIELDS } from './notes.js'
 import { tr } from './i18n.js'
+import { HISTORY_LIMIT, unusedPath } from './notes-paths.js'
+import { pruneNotesHistory } from './notes-history.js'
 
 const MAX_UNDO = 30
 const fingerprint = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -326,6 +328,12 @@ export class Store {
       const receipt = await this.acceptSaved(record, validateAcceptance)
       await this.notes.syncIndex(draft)
       await this.syncDerivedSkill?.(draft)
+      if (this.owner) {
+        // A fresh ownership scope queues cleanup after the enclosing native dispatch has finished.
+        this.owner.track(() => this.run(() => pruneNotesHistory(this))).catch(error => this.onCleanupError?.(error))
+      } else {
+        try { await pruneNotesHistory(this) } catch (error) { this.onCleanupError?.(error) }
+      }
       return receipt
     } catch (error) {
       try { await this.writes.restoreAccepted(record, error) } catch (restoreError) { error.cause = restoreError }
@@ -422,7 +430,7 @@ export class Store {
         if (!plan.some(entry => entry.workId === item.id && entry.language === language)) {
           const current = plan.find(entry => entry.workId === item.id && entry.current)
           plan.push({ ...current, language, current: false, registered: false,
-            reference: { ...current.reference, relativePath: `works/${encodeURIComponent(item.id)}-${language}.md`, language },
+            reference: { ...current.reference, relativePath: unusedPath(current.reference.notesRoot, 'works', sampleText(item.id, language).title, '.md', item.id + ':' + language, plan.map(entry => entry.reference.relativePath)), language },
             source: { id: item.id, createdAt: item.createdAt, ...sampleText(item.id, language) }, languageBasis: { kind: 'sample', language, source: 'packaged' } })
         }
         for (const entry of plan.filter(entry => entry.workId === item.id)) entry.current = entry.language === language
@@ -457,7 +465,7 @@ export class Store {
       if (!next.notesUndo?.some(entry => entry.id === record.undoOf)) throw Object.assign(new Error(tr('此编辑的撤销记录不可用，请核对当前作品')), { code: 'notes/undo-conflict', status: 409 })
       next.notesUndo = next.notesUndo.filter(entry => entry.id !== record.undoOf)
     }
-    if (record.undoEntry && !next.notesUndo?.some(entry => entry.id === record.undoEntry.id)) next.notesUndo = [...(next.notesUndo ?? []), record.undoEntry].slice(-MAX_UNDO)
+    if (record.undoEntry && !next.notesUndo?.some(entry => entry.id === record.undoEntry.id)) next.notesUndo = [...(next.notesUndo ?? []), record.undoEntry].slice(-HISTORY_LIMIT)
     await this.persist(next, () => {
       this.writes.validateSync(record)
       const validation = validateAcceptance?.()
@@ -498,6 +506,8 @@ export class Store {
       await this.refresh()
       await this.writes.recover()
       const record = this.writes.records.find(row => row.id === id)
+      const receipt = this.state.receipts?.find(row => row.id === id)
+      if (!record && receipt) return { ...structuredClone(receipt.outcome), acceptance: structuredClone(receipt), state: await this.hydrated() }
       if (!record) throw Object.assign(new Error(tr('保留的候选不存在，请刷新保存记录')), { code: 'notes/save-not-found', status: 404 })
       return this.resumeSaved(record, validateAcceptance)
     })

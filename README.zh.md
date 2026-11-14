@@ -27,7 +27,7 @@ kind: "package-bundle"
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.2
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.3
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
@@ -45,7 +45,7 @@ dsh --profile media-desk-dev --port 0 --no-open
 <a id="notes-work-files"></a>
 ### Notes 作品文件
 
-新作品使用 `notes/works/<work-id>-<language>.md`，未知语言记为 `und`。「正文」格子直接读取和编辑已登记的 Markdown，尚未成稿时也可使用。点击「直接修改」，再点击「保存」；格子显示相对文件位置和内容版本。保存草稿或接受成稿文字时，选择其作为同一份当前正文。非当前草稿与固定 AI 原稿使用 `notes/history/<work-id>/`。
+新作品使用 `notes/works/<标题>.md`，重名时加短身份编号。语言保存在文件元数据中，未知语言记为 `und`。「正文」格子直接读取和编辑已登记的 Markdown，尚未成稿时也可使用。点击「直接修改」，再点击「保存」；格子显示相对文件位置和内容版本。保存草稿或接受成稿文字时，选择其作为同一份当前正文。非当前草稿与固定 AI 原稿使用隐藏的 `notes/.media-desk/history/<work-id>/` 目录。近期历史与撤销各保留五条；当前草稿、仍被引用的原稿、活动候选和编辑器冲突证据继续保留。相同的冻结快照复用文件，发布副本在接受后清理。
 
 收藏来源与明确选中的作者样文使用 `notes/materials/*.md`。元数据记录来源、采集日期、稳定的外部身份、材料类型，以及正文是完整来源还是摘录。导入条目作为作品使用时，收藏来源与可编辑作品正文分别保留。只有创建自定义风格时明确选中的材料提供个人文风依据。自定义风格、写作规则和个人语气分别使用 `notes/preferences/styles/*.md`、`notes/preferences/rules/*.md` 与 `notes/preferences/voice.md`。内置风格预设仍随包提供。
 
@@ -153,7 +153,7 @@ pnpm test
 - 全部文字入口使用原生 Session。语法／构建检查和可控模型 fixture 不证明真实模型质量、付费图片服务可用性或订阅登录；本机验收记录说明实际模型与浏览器结果。
 - 未发送附件保留在 DSH 浏览器运行时，硬刷新后需重新添加；刷新前可先发送。已发送附件历史与已保存文字草稿由 DSH 管理。
 - 中断或失败的原生创建保留待建立状态。通过 `/media-desk/sessions` 或 `<DSH_HOME>/media-desk/sessions.json` 检查错误及已取得的实际 Session ID。不提供自动替代会话或待建立状态恢复。
-- 迁移保留旧作品文字、草稿、固定 AI 原稿、已保存语言、收藏材料和可编辑写作偏好。已接受媒体使用 `notes/assets/<work-id>/`；敏感的提供方设置与原始指标仍位于 Notes 外。重叠的逆向编辑需要先修复冲突；撤销失败保留记录。任务候选须通过所属任务校验，重试保存才可接受。
+- 迁移保留旧作品文字、草稿、固定 AI 原稿、已保存语言、收藏材料和可编辑写作偏好。已接受媒体使用 `notes/assets/<work-title>/`；敏感的提供方设置与原始指标仍位于 Notes 外。重叠的逆向编辑需要先修复冲突；撤销失败保留记录。任务候选须通过所属任务校验，重试保存才可接受。
 - 协作锁仅覆盖同机本地 Host，普通编辑器不参与。保留的编辑器句柄可在接受后继续修改移出的文件；后续读取保留双方版本并报告冲突。Notes 发布与 Store 接受分步执行，使用恢复日志，不构成文件系统事务。DSH 可在五秒关闭超时后强制退出，即使启动器退出码为零，成稿也可能仍处于中断状态。
 
 ### 开发备注

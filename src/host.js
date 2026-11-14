@@ -26,6 +26,7 @@ import { NativeWork } from './native-work.js'
 import { MediaFiles } from './media-files.js'
 import { Notes, notesSaveMessage } from './notes.js'
 import { WriteOwner } from './write-owner.js'
+import { pruneNotesHistory } from './notes-history.js'
 
 const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets')
 const MAX_JSON = 4_000_000
@@ -419,6 +420,7 @@ export default class MediaDeskHost extends Service {
     ctx.effect(() => () => this.close(), 'media-desk: writer ownership')
     await ownership.acquire()
     const store = new Store(ownership.dataRoot, ownership)
+    store.onCleanupError = error => ctx.logger.error(error)
     const settings = new Settings(store.root, ownership, store)
     const producer = new Producer({
       store, settings,
@@ -446,6 +448,7 @@ export default class MediaDeskHost extends Service {
     }
     await producer.settleAll()
     await nativeWork.init()
+    await store.run(async () => { try { await pruneNotesHistory(store) } catch (error) { store.onCleanupError(error) } })
     // 启动时恢复用户在工作台里选过的助手模型
     setAssistantModel((await settings.read()).assistant)
     ctx.inject(['shellEnv'], shellCtx => shellCtx.shellEnv.register({

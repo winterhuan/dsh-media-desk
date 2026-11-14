@@ -8,6 +8,7 @@ import { stateChanges } from './state-changes.js'
 import { notesUndoEntry } from './notes-undo.js'
 import { notesSaveMessage } from './notes.js'
 import { tr } from './i18n.js'
+import { historyDirectory } from './notes-paths.js'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const failure = (code, message) => Object.assign(new Error(message), { code, status: 409 })
@@ -96,7 +97,7 @@ export class NotesWrites {
       const subjectId = file.subjectId ?? file.workId
       const kind = file.kind ?? 'work'
       const language = file.after.language ?? 'und'
-      const location = `history/${encodeURIComponent(subjectId)}/${id}-${kind}-${language}`
+      const location = `${historyDirectory(subjectId)}/${id}-${kind}-${language}`
       const reference = suffix => ({ wikiRoot: file.after.wikiRoot, notesRoot: file.after.notesRoot,
         relativePath: `${location}-${suffix}.md`, ...(kind === 'work' ? { language } : { kind, id: subjectId }),
         ...(['candidate', 'before'].includes(suffix) ? { role: 'work-snapshot' } : {}),
@@ -133,7 +134,7 @@ export class NotesWrites {
       for (let index = 0; index < files.length; index++) {
         const file = files[index]
         const entry = entries[index]
-        await this.store.notes.createDirectory(entry.after.notesRoot, `history/${encodeURIComponent(entry.subjectId)}`)
+        await this.store.notes.createDirectory(entry.after.notesRoot, historyDirectory(entry.subjectId))
         await writeFile(join(entry.candidate.notesRoot, entry.candidate.relativePath), file.bytes, { flag: 'wx', mode: 0o600 })
         if (entry.beforeSnapshot && !file.before.snapshot) {
           await writeFile(join(entry.beforeSnapshot.notesRoot, entry.beforeSnapshot.relativePath), file.beforeBytes, { flag: 'wx', mode: 0o600 })

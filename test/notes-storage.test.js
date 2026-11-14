@@ -24,14 +24,14 @@ async function finishedProduction(runtime, id) {
   throw new Error('Production did not settle: ' + id)
 }
 
-test('新作品的唯一可编辑正文位于 Notes 稳定身份文件，Store 只保存引用', { timeout: 180000 }, async t => {
+test('新作品的唯一可编辑正文位于 Notes 标题文件，Store 只保存引用', { timeout: 180000 }, async t => {
   const runtime = await nativeRuntime(t)
   await runtime.start()
   const added = await runtime.host('ops', { ops: [{ op: 'add_item', title: 'An editable work', body: 'A single current Markdown body.\n', language: 'en', tags: ['notes'], source: 'A dated source', url: 'https://example.com/source' }] })
   assert.equal(added.status, 200, JSON.stringify(added.value))
   const id = added.value.receipts[0].target
   const work = added.value.state.items.find(row => row.id === id)
-  assert.equal(work.content.relativePath, `works/${id}-en.md`)
+  assert.equal(work.content.relativePath, 'works/An editable work.md')
   assert.equal(work.content.status, 'ready')
   assert.equal(work.body, 'A single current Markdown body.\n')
   const bytes = await readFile(join(runtime.wiki, 'notes', work.content.relativePath), 'utf8')
@@ -225,7 +225,7 @@ test('Notes 统一索引只导航登记作品，保留原有索引和无关笔�
   const reference = added.value.state.items.find(row => row.id === id).content
   let navigation = await readFile(join(notes, 'index.md'), 'utf8')
   assert.equal(navigation.slice(0, index.length), index)
-  assert.ok(navigation.includes(reference.relativePath))
+  assert.ok(navigation.includes(reference.relativePath.split('/').map(encodeURIComponent).join('/')))
   assert.match(navigation, /An indexed work/)
   await runtime.host('ops', { ops: [{ op: 'update_item', id, title: 'The indexed current title', status: 'published' }] })
   navigation = await readFile(join(notes, 'index.md'), 'utf8')

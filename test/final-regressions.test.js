@@ -57,7 +57,7 @@ test('Notes 索引捕获发布时的外部编辑和保留句柄写入，拒绝�
       assert.match(await readFile(path, 'utf8'), new RegExp('Editor paragraph ' + index))
     } finally { await editor.close() }
   }
-  const history = join(runtime.wiki, 'notes', 'history')
+  const history = join(runtime.wiki, 'notes', '.media-desk', 'history')
   const retained = (await readdir(history)).filter(name => name.startsWith('index%3A'))
   assert.ok(retained.length > 0)
   const bytes = await readFile(path, 'utf8')

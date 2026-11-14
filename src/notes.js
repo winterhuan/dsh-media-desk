@@ -1,10 +1,11 @@
 /** Registered work, material and preference Markdown supplies editable text; Store retains references and operational state. */
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs'
 import { lstat, mkdir, open, realpath, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { parseDocument, stringify } from 'yaml'
 import { tr } from './i18n.js'
+import { HISTORY_LIMIT, historyDirectory, unusedPath } from './notes-paths.js'
 
 const METADATA = ['title', 'tags', 'source', 'url', 'language', 'noteMetadata']
 const STYLE_TEXT = ['name', 'icon', 'summary', 'tone', 'sentences', 'opening', 'structure', 'words', 'avoid', 'samples', 'source', 'sourceUrls']
@@ -258,17 +259,31 @@ export class Notes {
     return kind === 'work' ? this.readWork(reference, id) : this.readManaged(reference, id, kind)
   }
 
+  /**
+   * Reuse identical frozen bytes; reject an existing snapshot changed by an external editor.
+   * @param {object} reference - Snapshot location under an owned Notes root.
+   * @param {Buffer|string} bytes - Expected frozen content.
+   * @returns {Promise<void>} Resolves after exclusive creation or fingerprint verification.
+   */
+  async writeSnapshotFile(reference, bytes) {
+    try { await writeFile(join(reference.notesRoot, reference.relativePath), bytes, { mode: 0o600, flag: 'wx' }) }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error
+      if (fingerprint(await this.readBytes(reference)) !== fingerprint(bytes)) throw failure('notes/history-invalid', tr('作品历史版本缺失或无效，请修复历史文件'))
+    }
+  }
+
   async saveManagedSnapshot(reference, id, kind, bytes) {
-    const relativePath = `history/${encodeURIComponent(id)}/${randomUUID()}-${kind}.md`
-    await this.createDirectory(reference.notesRoot, `history/${encodeURIComponent(id)}`)
-    await writeFile(join(reference.notesRoot, relativePath), bytes, { mode: 0o600, flag: 'wx' })
+    const relativePath = `${historyDirectory(id)}/${fingerprint(bytes)}-${kind}.md`
+    await this.createDirectory(reference.notesRoot, historyDirectory(id))
+    await this.writeSnapshotFile({ ...reference, relativePath }, bytes)
     return { wikiRoot: reference.wikiRoot, notesRoot: reference.notesRoot, relativePath, sha256: fingerprint(bytes), role: `${kind}-snapshot`, kind, id }
   }
 
   async saveSnapshot(reference, id, bytes) {
-    const relativePath = `history/${encodeURIComponent(id)}/${randomUUID()}-snapshot.md`
-    await this.createDirectory(reference.notesRoot, `history/${encodeURIComponent(id)}`)
-    await writeFile(join(reference.notesRoot, relativePath), bytes, { mode: 0o600, flag: 'wx' })
+    const relativePath = `${historyDirectory(id)}/${fingerprint(bytes)}-snapshot.md`
+    await this.createDirectory(reference.notesRoot, historyDirectory(id))
+    await this.writeSnapshotFile({ ...reference, relativePath }, bytes)
     return { wikiRoot: reference.wikiRoot, notesRoot: reference.notesRoot, relativePath,
       language: reference.language, sha256: fingerprint(bytes), role: 'work-snapshot' }
   }
@@ -281,17 +296,16 @@ export class Notes {
 
   async writeFixed(item, role, text, details = {}) {
     const root = item.content.notesRoot
-    const relativePath = `history/${encodeURIComponent(item.id)}/${randomUUID()}.md`
     const metadata = { format: 1, kind: 'history', workId: item.id, role, ...details }
     const bytes = `---\n${stringify(metadata)}---\n\n${text}`
-    const path = join(root, relativePath)
-    await this.createDirectory(root, `history/${encodeURIComponent(item.id)}`)
-    await writeFile(path, bytes, { mode: 0o600, flag: 'wx' })
+    const relativePath = `${historyDirectory(item.id)}/${fingerprint(bytes)}.md`
+    await this.createDirectory(root, historyDirectory(item.id))
+    await this.writeSnapshotFile({ notesRoot: root, relativePath }, bytes)
     return { wikiRoot: item.content.wikiRoot, notesRoot: root, relativePath, sha256: fingerprint(bytes), role }
   }
 
   async readFixed(reference, id) {
-    if (!reference.relativePath.startsWith(`history/${encodeURIComponent(id)}/`)) throw failure('notes/history-invalid', tr('作品历史版本缺失或无效，请修复历史文件'))
+    if (![historyDirectory(id) + '/', `history/${encodeURIComponent(id)}/`].some(prefix => reference.relativePath.startsWith(prefix))) throw failure('notes/history-invalid', tr('作品历史版本缺失或无效，请修复历史文件'))
     const bytes = await this.readBytes(reference)
     if (reference.role === 'work-snapshot') return (await this.readSnapshot(reference, id, reference.language)).body
     const { metadata, body } = this.decode(bytes)
@@ -385,6 +399,7 @@ export class Notes {
     }
     if (previous?.textVersion?.relativePath !== production?.textVersion?.relativePath) retain(previous?.textVersion)
     if (previous?.aiVersion?.relativePath !== production?.aiVersion?.relativePath) retain(previous?.aiVersion)
+    if (item.textHistory?.length > HISTORY_LIMIT) item.textHistory = item.textHistory.slice(-HISTORY_LIMIT)
   }
 
   async projectHistory(item) {
@@ -724,7 +739,11 @@ export class Notes {
       if (variants.every(([, variant]) => variant.content)) continue
       for (const [language, variant] of variants) {
         if (!['zh', 'en', 'und'].includes(language)) throw failure('notes/language-invalid', tr('请选择作品语言，未知语言使用 und'), 400)
-        const reference = variant.content ?? { wikiRoot: root.wikiRoot, notesRoot: root.notesRoot, relativePath: `works/${encodeURIComponent(item.id)}-${language}.md`, language }
+        const reserved = plan.filter(row => row.reference.notesRoot === root.notesRoot).map(row => row.reference.relativePath)
+        let path = unusedPath(root.notesRoot, 'works', variant.title, '.md', item.id + ':' + language, reserved)
+        const legacyPath = `works/${encodeURIComponent(item.id)}-${language}.md`
+        try { lstatSync(join(root.notesRoot, legacyPath)); path = legacyPath } catch (error) { if (error.code !== 'ENOENT') throw error }
+        const reference = variant.content ?? { wikiRoot: root.wikiRoot, notesRoot: root.notesRoot, relativePath: path, language }
         if (!this.roots.has(reference.notesRoot) || typeof reference.wikiRoot !== 'string') throw failure('notes/unowned-root', tr('作品所在的 Notes 目录尚未取得写入所有权'))
         plan.push({ workId: item.id, language, current: variant === variants[0][1], source: { createdAt: legacy.createdAt, ...structuredClone(variant), id: item.id, language },
           reference, registered: Boolean(variant.content), languageBasis: variant.content || variant.language === language ? { kind: 'explicit', language }
@@ -918,7 +937,8 @@ export class Notes {
       const source = item.body
       this.selectText(item, null)
       const language = item.language ?? 'und'
-      const relativePath = `works/${item.id}-${language}.md`
+      const reserved = draft.items.flatMap(row => [row, ...Object.values(row.otherLang ?? {})]).filter(row => row.content?.notesRoot === this.root).map(row => row.content.relativePath)
+      const relativePath = unusedPath(this.root, 'works', item.title, '.md', item.id + ':' + language, reserved)
       item.language = language
       const bytes = this.document(item)
       item.content = { wikiRoot: this.wikiRoot, notesRoot: this.root, relativePath, language, revision: nextRevision(item.id), sha256: fingerprint(bytes), status: 'ready' }

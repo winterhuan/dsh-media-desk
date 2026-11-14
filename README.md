@@ -27,7 +27,7 @@ Install the fixed Git release into a separate DSH `0.2.2-rc.1` Web profile and o
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.2
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.3
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
@@ -45,7 +45,7 @@ The native Session's selected model controls its conversation. The saved assista
 <a id="notes-work-files"></a>
 ### Notes work files
 
-New works use `notes/works/<work-id>-<language>.md`, with `und` for an unknown language. The **Body** tile reads and edits that registered Markdown directly, including before production. Use **Edit**, then **Save**; the tile shows the relative file path and content version. Saving a draft or accepting production text selects it as the same current body. Inactive drafts and fixed AI originals use `notes/history/<work-id>/`.
+New works use `notes/works/<title>.md`; duplicate titles receive a short identity suffix. The file metadata retains the language, including `und` when unknown. The **Body** tile reads and edits that registered Markdown directly, including before production. Use **Edit**, then **Save**; the tile shows the relative file path and content version. Saving a draft or accepting production text selects it as the same current body. Inactive drafts and fixed AI originals use the hidden `notes/.media-desk/history/<work-id>/` directory. Recent history and undo each retain five entries; current drafts, referenced originals, active candidates and editor conflicts remain available. Identical frozen snapshots share a file; publication copies expire after acceptance.
 
 Collected sources and explicitly selected author samples use `notes/materials/*.md`. Their metadata records the source, collection date, stable external identity, material type and whether the text is complete or an excerpt. An imported item used as a work retains its collected source separately from its editable work body. Only material selected while creating a custom style supplies personal-style evidence. Custom styles, writing rules and personal voice use `notes/preferences/styles/*.md`, `notes/preferences/rules/*.md` and `notes/preferences/voice.md`. Built-in style presets remain package files.
 
@@ -153,7 +153,7 @@ The plugin does not manage a KV cache. Repeated prompt prefixes may be reused by
 - All text entry points use native Sessions. Syntax/build checks and controlled-model fixtures do not establish real model quality, paid image-service availability or subscription sign-in. The local acceptance record states the observed real model and browser results.
 - Unsent attachments stay in the DSH browser runtime and do not survive a hard refresh; send them first or add them again. DSH manages sent attachment history and saved text drafts.
 - Interrupted or failed native creation stays pending. Inspect `/media-desk/sessions` or `<DSH_HOME>/media-desk/sessions.json` for its error and actual Session ID when available. Automatic replacement and pending-creation recovery are unavailable.
-- Migration preserves legacy work text, drafts, fixed AI originals, saved languages, collected material and editable writing preferences. Accepted media uses `notes/assets/<work-id>/`; sensitive provider settings and raw metrics remain outside Notes. Overlapping inverse edits require conflict repair; failed undo retains its record. Task-owned candidates need their task validation before a save retry can accept them.
+- Migration preserves legacy work text, drafts, fixed AI originals, saved languages, collected material and editable writing preferences. Accepted media uses `notes/assets/<work-title>/`; sensitive provider settings and raw metrics remain outside Notes. Overlapping inverse edits require conflict repair; failed undo retains its record. Task-owned candidates need their task validation before a save retry can accept them.
 - Cooperative locks cover same-machine local Hosts. Ordinary editors do not take them. Retained editor handles can change displaced files after acceptance; subsequent reads preserve both versions and report a conflict. Notes publication and Store acceptance are separate steps, with a recovery journal rather than a filesystem transaction. DSH can force process exit after its five-second shutdown timeout, leaving production interrupted even when the launcher exits with code zero.
 
 ### Dev Note
