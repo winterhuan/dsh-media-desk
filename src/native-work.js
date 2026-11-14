@@ -244,7 +244,7 @@ export class NativeWork {
       if (association.workId !== null && workId !== association.workId) throw failure('native/foreign-object', 'This Session owns another work', 403)
       const work = state.items.find(row => row.id === workId)
       if (!work) {
-        if (workId !== null) throw failure('native/work-missing', 'Work not found', 404)
+        if (workId !== null) throw failure('native/work-missing', 'Work not found. For a global review, call media_desk_read with kind work and omit id to list works, then use a returned work id. Stage and association ids do not identify works.', 404)
         return page({ works: state.items.map(row => ({ id: row.id, title: row.title, status: row.status, content: row.content })),
           stage: this.currentStage(state, association) })
       }

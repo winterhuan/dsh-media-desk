@@ -368,7 +368,7 @@ async function route(ctx, store, desk, req, res) {
     }
     case 'capture-url': return jsonState(res, store, await addFromUrl(ctx, store, body, desk.ownership.signal))
     case 'skills/learn': {
-      const stage = await desk.nativeWork.request('rules', null, 'Read current Notes work and its fixed AI originals, and the recorded performance metrics. Propose evidence-based writing rules as rules[{name,rule,evidence}]. Treat correlations as observations rather than causation; proposals require user review.')
+      const stage = await desk.nativeWork.request('rules', null, 'Review the registered works across the global workspace. List works first, then read relevant works and follow their current Notes and fixed AI-original references. A global stage with workId null does not mean the work list is empty. Read recorded performance metrics and their work associations. Propose evidence-based writing rules as rules[{name,rule,evidence}]. Treat correlations as observations rather than causation; proposals require user review. If the evidence is insufficient after reading the works, submit rules[] and explain the specific limitation.')
       return jsonState(res, store, { stage })
     }
     case 'skills/export': {

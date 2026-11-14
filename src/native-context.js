@@ -23,7 +23,7 @@ export function apply(ctx) {
   }))
   register('media_desk_read', 'Read the current registered work, writing preferences, materials or metrics and the owned structured stage. Responses within the limit return content directly; larger responses return paged JSON text with a continuation offset.', {
     kind: { type: 'string', enum: ['work', 'preferences', 'materials', 'metrics'], description: 'preferences returns the global style/rule catalog with current versions and status, excluding author samples. Work Sessions read selected or stage-frozen writing preferences.' },
-    id: { type: 'string', description: 'Work identity. A work Session can read its own work only; the global assistant can select a listed work.' },
+    id: { type: 'string', description: 'For kind work, omit id to read the bound work or list all works in the global session. To select a work globally, use an id from that list. Stage and association ids are not work ids. Omit id for other kinds.' },
     offset: { type: 'integer', description: 'Character offset in the complete JSON text, defaults to 0.' },
     limit: { type: 'integer', description: 'JSON text characters to return, 1–20000, defaults to 12000.' },
   }, (args, exec) => work.read(exec, args))

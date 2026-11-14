@@ -27,7 +27,7 @@ kind: "package-bundle"
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.5
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.6
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
@@ -135,7 +135,7 @@ pnpm test
 
 #### 模型看到什么
 
-原生 Agent 通过[业务工具](src/native-context.js)读取有界作品、保留草稿引用、冻结写作偏好、选定材料和指标。普通编辑须满足实际 Session 归属与当前 Notes 版本；选段也保留选择时版本。`media_desk_edit` 的 `revise_production` 操作须匹配当前尝试，修改选中的 Notes 正文或有界画面描述，并返回供 `media_desk_produce` 显式重画的目标。同一结果身份与相同参数返回已保存回执；不同参数报告冲突。结构化策划、脚本、风格和规则候选须匹配已持久成功的原生轮次。Host 图片任务消费已接受策划；生图工具仅接收图片提示词，不接收文字模型凭据。
+原生 Agent 通过[业务工具](src/native-context.js)读取有界作品、保留草稿引用、冻结写作偏好、选定材料和指标。普通编辑须满足实际 Session 归属与当前 Notes 版本；选段也保留选择时版本。`media_desk_edit` 的 `revise_production` 操作须匹配当前尝试，修改选中的 Notes 正文或有界画面描述，并返回供 `media_desk_produce` 显式重画的目标。同一结果身份与相同参数返回已保存回执；不同参数报告冲突。结构化策划、脚本、风格和规则候选须匹配已持久成功的原生轮次。Host 图片任务消费已接受策划；生图工具仅接收图片提示词，不接收文字模型凭据。 全局规则复盘先以 `kind: "work"` 且不传 `id` 调用 `media_desk_read` 列举作品，再使用返回的作品 ID 读取当前 Notes 和固定 AI 原稿引用。全局阶段的 `workId: null`；阶段和会话关联 ID 不代表作品。复盘结合指标与作品的关联，证据不足时可不提出规则；规则提案须由用户审阅。
 
 #### Token 影响
 

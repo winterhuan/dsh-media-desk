@@ -27,7 +27,7 @@ Install the fixed Git release into a separate DSH `0.2.2-rc.1` Web profile and o
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.5
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.6
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
@@ -135,7 +135,7 @@ Native conversations use DSH's model adapter and cache behavior. Media Desk adds
 
 #### What the model sees
 
-The native Agent reads bounded registered work, retained draft references, frozen writing preferences, selected materials and metrics through [business tools](src/native-context.js). Ordinary edits require actual Session ownership and current Notes versions; selected passages also retain their selection version. The `revise_production` operation in `media_desk_edit` requires the current attempt, revises the selected Notes text or bounded media descriptions, and returns targets for explicit `media_desk_produce` redraw. Reusing a result identity with identical arguments returns its saved receipt; different arguments conflict. Structured plan, article, style and rule candidates require the matched durable successful native turn. Host image workers consume the accepted plan; image tools receive image prompts and no text-model credentials.
+The native Agent reads bounded registered work, retained draft references, frozen writing preferences, selected materials and metrics through [business tools](src/native-context.js). Ordinary edits require actual Session ownership and current Notes versions; selected passages also retain their selection version. The `revise_production` operation in `media_desk_edit` requires the current attempt, revises the selected Notes text or bounded media descriptions, and returns targets for explicit `media_desk_produce` redraw. Reusing a result identity with identical arguments returns its saved receipt; different arguments conflict. Structured plan, article, style and rule candidates require the matched durable successful native turn. Host image workers consume the accepted plan; image tools receive image prompts and no text-model credentials. Global rule reviews list works with `media_desk_read` using `kind: "work"` and no `id`, then select returned work IDs to read current Notes and fixed AI-original references. A global stage has `workId: null`; its stage and association IDs do not identify works. Reviews use metrics with their work associations and may return no proposals when evidence is insufficient. Proposed rules require user review.
 
 #### Token effect
 

@@ -23,6 +23,39 @@ const waitState = async (runtime, predicate) => {
   throw new Error('Expected accepted Host state was not observed\n' + runtime.log)
 }
 
+test('全局复盘把任务编号误传为作品编号后可发现作品并读取正文与指标', { timeout: 180000 }, async t => {
+  const runtime = await nativeRuntime(t, { recipes: { MD_STAGE_rules: { calls: [read,
+    { name: 'media_desk_read', arguments: { kind: 'work', id: '$stageId' } },
+    read,
+    { name: 'media_desk_read', arguments: { kind: 'work', id: 'seed_2' } },
+    { name: 'media_desk_read', arguments: { kind: 'metrics' } },
+    { name: 'media_desk_submit_result', arguments: { stageId: '$stageId', result: JSON.stringify({ rules: [] }) } },
+  ], reply: 'Reviewed the available work; no supported rule to propose.' } } })
+  await runtime.start()
+  const initial = (await runtime.host('state')).value.state
+  assert.equal((await runtime.host('ops', { ops: initial.items.filter(work => !['seed_1', 'seed_2'].includes(work.id))
+    .map(work => ({ op: 'delete_item', id: work.id })) })).status, 200)
+  assert.equal((await runtime.host('notes/migrate', {})).status, 200)
+  const requested = await runtime.host('skills/learn', {})
+  assert.equal(requested.status, 200)
+  const stage = requested.value.stage
+  const turn = await runtime.turn(stage.sessionId, stage.requestId)
+  const results = turn.events.filter(event => event.type === 'tool/result')
+  assert.equal(results.length, 6)
+  assert.equal(results[1].data.message.isError, true)
+  assert.match(results[1].data.message.content[0].text, /omit id.*list works/)
+  assert.ok(results.filter((_, index) => index !== 1).every(event => !event.data.message.isError))
+  const listing = JSON.parse(results[2].data.message.content[0].text)
+  assert.equal(listing.stage.workId, null)
+  assert.ok(listing.works.some(work => work.id === 'seed_2' && work.content))
+  const work = JSON.parse(results[3].data.message.content[0].text)
+  assert.equal(work.id, 'seed_2')
+  assert.equal(typeof work.body, 'string')
+  assert.ok(work.body.length > 0)
+  assert.ok(Array.isArray(JSON.parse(results[4].data.message.content[0].text).metrics))
+  await waitState(runtime, state => state.nativeRequests.some(row => row.id === stage.id && row.status === 'accepted'))
+})
+
 test('原生工具按实际 Agent 归属编辑，保留持久回执与唯一 Notes 正文', { timeout: 180000 }, async t => {
   const runtime = await nativeRuntime(t, { recipes: { MD_FIXTURE_EDIT: { calls: [read,
     { name: 'media_desk_edit', arguments: { operations: JSON.stringify([{ op: 'update_item', id: 'seed_2', body: 'Accepted by the native business tool.' }]), expectedContent: '$versions', resultId: 'native-edit' } },
