@@ -27,7 +27,7 @@ Install the fixed Git release into a separate DSH `0.2.2-rc.1` Web profile and o
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.1
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.2
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 

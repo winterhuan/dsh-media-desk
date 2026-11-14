@@ -183,6 +183,7 @@ async function route(ctx, store, desk, req, res) {
   const path = url.pathname.replace(/^\/media-desk\/?/, '')
   const method = req.method || 'GET'
 
+  if (method === 'GET' && path === 'media/saves') return json(res, 200, { saves: await desk.mediaFiles.saves() })
   if ((method === 'GET' || method === 'HEAD') && path.startsWith('assets/')) {
     const name = path.slice('assets/'.length)
     if (!/^[\w.-]+$/.test(name)) return json(res, 400, { error: tr('路径无效') })
@@ -202,7 +203,6 @@ async function route(ctx, store, desk, req, res) {
   if (method === 'GET') {
     if (path === 'notes/migrations') return json(res, 200, { migrations: await store.migration.list() })
     if (path === 'notes/saves') return json(res, 200, { writes: await store.saves() })
-    if (path === 'media/saves') return json(res, 200, { saves: await desk.mediaFiles.saves() })
     if (path === 'sessions') return json(res, 200, { associations: await desk.nativeSessions.list() })
     if (path === 'state') {
       let state = await store.read()
