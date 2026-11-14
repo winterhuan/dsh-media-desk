@@ -1,11 +1,32 @@
 /** The official conversation factory renders tool cards, approval, questions and native input. */
 import React from 'react'
-import { openNativeSession, newNativeConversation, report, setDesk, useDesk } from './desk.js'
+import { openItem, openNativeSession, newNativeConversation, report, setDesk, useDesk } from './desk.js'
 import { t } from './i18n.js'
-import { IconButton } from './ui.jsx'
+import { Icon, IconButton } from './ui.jsx'
+
+/** Link durable accepted work from this association; candidates and other Sessions stay outside the list. */
+function AcceptedReceipts({ associationId }) {
+  const state = useDesk(snapshot => snapshot.state)
+  const stages = new Set(state.nativeRequests?.filter(row => row.associationId === associationId).map(row => 'stage:' + row.id))
+  const receipts = (state.receipts ?? []).filter(receipt => receipt.resultKey.startsWith(`native:${associationId}:`) || stages.has(receipt.resultKey))
+    .flatMap(receipt => {
+      const targets = new Set([receipt.outcome?.workId, ...receipt.outcome?.receipts?.filter(row => row.kind === 'item').map(row => row.target) ?? []].filter(Boolean))
+      return [...targets].flatMap(id => {
+        const work = state.items.find(row => row.id === id)
+        return work ? [{ receipt, work }] : []
+      })
+    }).slice(-4).reverse()
+  if (!receipts.length) return null
+  return <section className="md-chat-receipts" aria-label={t('已接受的修改')}>
+    {receipts.map(({ receipt, work }) => <button type="button" className="md-receipt" key={`${receipt.id}:${work.id}`} data-receipt-id={receipt.id} data-work-id={work.id} onClick={() => openItem(work.id)}>
+      <span className="md-receipt-check"><Icon name="check" size={11} /></span>
+      <span>{t('查看已接受作品：{title}', { title: work.title })}</span>
+    </button>)}
+  </section>
+}
 
 /** Bind one ordinary Session reference for the visible work/global panel. */
-export function ChatPanel({ itemId = null, head, top, retainSession, renderConversation, initializeDraft }) {
+export function ChatPanel({ itemId = null, head, top, retainSession, SessionProvider, renderSlot, initializeDraft }) {
   const [binding, setBinding] = React.useState(null)
   const [error, setError] = React.useState(null)
   const referenceRef = React.useRef(null)
@@ -26,7 +47,7 @@ export function ChatPanel({ itemId = null, head, top, retainSession, renderConve
   }, [itemId, retainSession])
   React.useEffect(() => {
     if (!quote || !binding || binding.itemId !== itemId || itemId === null) return
-    const selection = quote.version ? `\n[Media Desk selection: ${JSON.stringify({ [itemId]: quote.version })}]` : ''
+    const selection = quote.version ? `\n[Media Desk selection: ${JSON.stringify({ [itemId]: { revision: quote.version.revision, sha256: quote.version.sha256 } })}]` : ''
     const text = (quote.text ? `${quote.label}:\n${quote.text}` : quote.label) + selection
     if (initializeDraft(binding.reference, text) === 'applied') setDesk({ chatQuote: null })
   }, [binding, quote, itemId, initializeDraft])
@@ -46,7 +67,8 @@ export function ChatPanel({ itemId = null, head, top, retainSession, renderConve
   return <div className="md-chat">
     <header className="md-dock-head">{head}<IconButton icon="refresh" label={t('开始新对话')} disabled={restarting} onClick={restart} /></header>
     {top}
-    {error ? <p className="md-msg-error" role="status">{error}</p> : binding?.itemId === itemId ? renderConversation(binding.reference) : <div className="md-loading" aria-busy="true" />}
+    {error ? <p className="md-msg-error" role="status">{error}</p> : binding?.itemId === itemId ? <SessionProvider session={binding.reference}>{renderSlot('media-desk.conversation', {})}</SessionProvider> : <div className="md-loading" aria-busy="true" />}
+    {binding?.itemId === itemId ? <AcceptedReceipts associationId={binding.association.id} /> : null}
   </div>
 }
 

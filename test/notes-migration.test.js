@@ -35,6 +35,179 @@ function legacyState() {
     styles: [{ id: 'custom-style', name: 'Original style', tone: 'Original tone' }], chat: [{ id: 'legacy-chat', text: 'Preserved old conversation', role: 'user', itemId: 'populated_work' }] }
 }
 
+test('只有收藏来源的导入条目在首次创作前沿用已有会话目录登记作品，成稿和首份草稿均保留独立材料', { timeout: 180000 }, async t => {
+  const recipes = {}
+  const runtime = await nativeRuntime(t, { recipes })
+  const barrier = Object.fromEntries(['enteredPath', 'releasePath', 'abortedPath', 'settledPath'].map(name => [name, join(runtime.root, name)]))
+  const plan = { title: 'New work based on imported source', coverText: 'Source', cover: 'Paper', facts: [], outline: [], images: [], shots: [], sources: [] }
+  const article = 'A newly accepted article based on that material.\n'
+  const read = { name: 'media_desk_read', arguments: { kind: 'work' } }
+  recipes.MD_STAGE_plan = { calls: [read, { name: 'media_desk_submit_result', arguments: { stageId: '$stageId', result: JSON.stringify(plan) } }], barrier: { ...barrier, at: 0 }, reply: 'Plan candidate submitted.' }
+  recipes.MD_STAGE_article = { calls: [read, { name: 'media_desk_submit_result', arguments: { stageId: '$stageId', result: JSON.stringify({ article, sources: [] }) } }], reply: 'Article candidate submitted.' }
+  const source = { id: 'imported-source-only', imported: true, kind: 'note', title: 'The collected source', body: 'The independently collected source material.\n',
+    source: 'Independent source', createdAt: '2026-11-01T12:00:00Z', collectedAt: '2026-11-01T12:00:00Z', status: 'ready', drafts: {} }
+  const draftSource = { ...source, id: 'imported-first-draft', title: 'The draft source' }
+  const resetSource = { ...source, id: 'imported-after-reset', title: 'The source with a new conversation' }
+  const data = join(runtime.home, 'media-desk')
+  await mkdir(data)
+  await writeFile(join(data, 'state.json'), JSON.stringify({ version: 1, sampleCleared: true, items: [source, draftSource, resetSource], styles: [], skills: [], people: [], angles: [], accounts: [], metrics: [], chat: [] }))
+  await runtime.start()
+  const migrated = await runtime.host('notes/migrate', {})
+  assert.equal(migrated.status, 200, JSON.stringify(migrated.value))
+  const imported = migrated.value.state.items.find(row => row.id === source.id)
+  assert.equal(imported.content, undefined)
+  const materialPath = join(imported.materialContent.notesRoot, imported.materialContent.relativePath)
+  const materialBytes = await readFile(materialPath, 'utf8')
+  const importedDraft = migrated.value.state.items.find(row => row.id === draftSource.id)
+  const draftMaterialPath = join(importedDraft.materialContent.notesRoot, importedDraft.materialContent.relativePath)
+  const draftMaterialBytes = await readFile(draftMaterialPath, 'utf8')
+  const importedReset = migrated.value.state.items.find(row => row.id === resetSource.id)
+  const resetMaterialPath = join(importedReset.materialContent.notesRoot, importedReset.materialContent.relativePath)
+  const resetMaterialBytes = await readFile(resetMaterialPath, 'utf8')
+  const opened = await runtime.host('sessions/open', { workId: source.id })
+  assert.equal(opened.status, 200, JSON.stringify(opened.value))
+  const association = opened.value.association
+  const openedReset = await runtime.host('sessions/open', { workId: resetSource.id })
+  assert.equal(openedReset.status, 200, JSON.stringify(openedReset.value))
+  assert.equal(openedReset.value.association.wikiRoot, association.wikiRoot)
+  const secondWiki = join(runtime.root, 'second-wiki')
+  await mkdir(secondWiki)
+  await writeFile(join(secondWiki, 'AGENTS.md'), 'Use llm-wiki and keep source dates.\n')
+  await runtime.stop()
+  await runtime.start([], { WIKI_PATH: secondWiki })
+  const reset = await runtime.host('chat/clear', { workId: resetSource.id })
+  assert.equal(reset.status, 200, JSON.stringify(reset.value))
+  const resetAssociation = reset.value.association
+  assert.notEqual(resetAssociation.sessionId, openedReset.value.association.sessionId)
+  assert.notEqual(resetAssociation.wikiRoot, association.wikiRoot)
+  await runtime.host('settings', { imageCount: 0, shotCount: 0 })
+  const admitted = await Promise.all([runtime.host('produce', { id: source.id }), runtime.host('produce', { id: resetSource.id })])
+  for (const response of admitted) assert.equal(response.status, 200, JSON.stringify(response.value))
+  const pending = (await runtime.host('state')).value.state
+  const promoted = pending.items.find(row => row.id === source.id)
+  const stage = pending.nativeRequests.find(row => row.workId === source.id && row.kind === 'plan')
+  assert.equal(promoted.content?.status, 'ready')
+  assert.equal(promoted.content.notesRoot, association.notesRoot)
+  assert.equal(promoted.content.wikiRoot, association.wikiRoot)
+  assert.equal(stage.sessionId, association.sessionId)
+  assert.equal(promoted.content.language, 'und')
+  assert.deepEqual(stage.expectedContent[source.id], promoted.content)
+  assert.deepEqual(stage.data.materialVersion, promoted.content.snapshot)
+  assert.equal(stage.data.language, promoted.content.language)
+  assert.equal(promoted.sourceMaterial.body, source.body)
+  const promotedReset = pending.items.find(row => row.id === resetSource.id)
+  const resetStage = pending.nativeRequests.find(row => row.workId === resetSource.id && row.kind === 'plan')
+  assert.equal(promotedReset.content.notesRoot, resetAssociation.notesRoot)
+  assert.equal(promotedReset.content.wikiRoot, resetAssociation.wikiRoot)
+  assert.equal(resetStage.sessionId, resetAssociation.sessionId)
+  assert.deepEqual(resetStage.expectedContent[resetSource.id], promotedReset.content)
+  assert.deepEqual(resetStage.data.materialVersion, promotedReset.content.snapshot)
+  await writeFile(barrier.releasePath, 'release\n')
+  // Two plan/article Session pairs share Host and filesystem capacity during the concurrent suite.
+  const deadline = Date.now() + 120000
+  let completed, resetCompleted
+  while (Date.now() < deadline) {
+    const state = (await runtime.host('state')).value.state
+    completed = state.items.find(row => row.id === source.id)
+    resetCompleted = state.items.find(row => row.id === resetSource.id)
+    if (completed.production.status === 'done' && resetCompleted.production.status === 'done') break
+    assert.ok(!state.nativeRequests.some(row => ['failed', 'save-failed'].includes(row.status)), JSON.stringify(state.nativeRequests) + runtime.log)
+    await new Promise(resolve => setTimeout(resolve, 25))
+  }
+  assert.equal(completed.production.status, 'done', runtime.log)
+  assert.equal(resetCompleted.production.status, 'done', runtime.log)
+  assert.equal(resetCompleted.body, article)
+  assert.equal(resetCompleted.sourceMaterial.body, resetSource.body)
+  assert.equal(await readFile(resetMaterialPath, 'utf8'), resetMaterialBytes)
+  assert.equal(completed.production.article, article)
+  assert.equal(completed.body, article)
+  assert.equal(completed.sourceMaterial.body, source.body)
+  assert.equal(completed.sourceMaterial.title, source.title)
+  assert.equal(await readFile(materialPath, 'utf8'), materialBytes)
+  assert.match(await readFile(join(completed.content.notesRoot, completed.content.relativePath), 'utf8'), /A newly accepted article/)
+  const savedDraft = await runtime.host('ops', { ops: [{ op: 'save_draft', id: draftSource.id, format: 'script', text: 'The first independently accepted draft.\n' }] })
+  assert.equal(savedDraft.status, 200, JSON.stringify(savedDraft.value))
+  const drafted = savedDraft.value.state.items.find(row => row.id === draftSource.id)
+  assert.equal(drafted.content.status, 'ready')
+  assert.equal(drafted.body, 'The first independently accepted draft.\n')
+  assert.equal(drafted.drafts.script.text, drafted.body)
+  assert.equal(drafted.sourceMaterial.body, draftSource.body)
+  assert.equal(await readFile(draftMaterialPath, 'utf8'), draftMaterialBytes)
+  const durable = JSON.parse(await readFile(join(data, 'state.json'), 'utf8'))
+  for (const work of durable.items) {
+    assert.equal(work.body, undefined)
+    assert.equal(work.production?.article, undefined)
+    assert.equal(work.production?.aiArticle, undefined)
+    assert.equal(work.sourceMaterial, undefined)
+    for (const draft of Object.values(work.drafts ?? {})) { assert.equal(draft.text, undefined); assert.equal(draft.aiText, undefined) }
+  }
+  const requests = await readFile(runtime.telemetryPath, 'utf8')
+  await runtime.stop()
+  await runtime.start([], { WIKI_PATH: secondWiki })
+  const cold = (await runtime.host('state')).value.state
+  assert.equal(cold.items.find(row => row.id === source.id).body, article)
+  assert.equal(cold.items.find(row => row.id === resetSource.id).body, article)
+  assert.equal(cold.items.find(row => row.id === resetSource.id).content.notesRoot, resetAssociation.notesRoot)
+  assert.equal(cold.items.find(row => row.id === draftSource.id).body, drafted.body)
+  assert.equal(cold.items.find(row => row.id === source.id).sourceMaterial.body, source.body)
+  assert.equal(await readFile(materialPath, 'utf8'), materialBytes)
+  assert.equal(await readFile(runtime.telemetryPath, 'utf8'), requests)
+})
+
+test('收藏材料带成稿和语言稿时分别迁移原始来源与唯一作品正文', { timeout: 180000 }, async t => {
+  const runtime = await nativeRuntime(t)
+  const data = join(runtime.home, 'media-desk')
+  await mkdir(data)
+  const legacy = legacyState()
+  Object.assign(legacy.items[0], { imported: true, collectedAt: '2026-11-01T12:00:00Z', materialType: 'source', completeness: 'complete' })
+  await writeFile(join(data, 'state.json'), JSON.stringify(legacy))
+  await runtime.start()
+  const migrated = await runtime.host('notes/migrate', {})
+  assert.equal(migrated.status, 200, JSON.stringify(migrated.value))
+  const work = migrated.value.state.items[0]
+  assert.equal(work.body, 'The accepted current production.\n')
+  assert.equal(work.sourceMaterial.body, legacy.items[0].body)
+  assert.equal(work.sourceMaterial.title, legacy.items[0].title)
+  assert.equal(work.sourceMaterial.source, legacy.items[0].source)
+  const materialPath = join(work.materialContent.notesRoot, work.materialContent.relativePath)
+  const materialBytes = await readFile(materialPath, 'utf8')
+  assert.match(materialBytes, /未标明语言的原始选题。/)
+  assert.doesNotMatch(materialBytes, /The accepted current production/)
+  const primary = join(work.content.notesRoot, work.content.relativePath)
+  await writeFile(primary, (await readFile(primary, 'utf8')).replace('The accepted current production.', 'The externally edited current work.').replace('原有作品标题', 'Externally edited work title').replace('Original source', 'Edited work source'))
+  const current = (await runtime.host('state')).value.state.items[0]
+  assert.equal(current.body, 'The externally edited current work.\n')
+  assert.equal(current.production.article, current.body)
+  assert.equal(current.title, 'Externally edited work title')
+  assert.equal(current.source, 'Edited work source')
+  assert.deepEqual(current.materialContent, work.materialContent)
+  assert.equal(current.sourceMaterial.body, legacy.items[0].body)
+  const changed = await runtime.host('ops', { expectedContent: { [current.id]: current.content }, ops: [{ op: 'update_item', id: current.id, body: 'A newly accepted current work.\n' }] })
+  assert.equal(changed.status, 200, JSON.stringify(changed.value))
+  assert.equal(await readFile(materialPath, 'utf8'), materialBytes)
+  await writeFile(materialPath, materialBytes.replace('未标明语言的原始选题。', 'An independently edited source collection.').replace('原有作品标题', 'Edited source title'))
+  const reread = (await runtime.host('state')).value.state.items[0]
+  assert.equal(reread.body, 'A newly accepted current work.\n')
+  assert.equal(reread.production.article, reread.body)
+  assert.equal(reread.title, 'Externally edited work title')
+  assert.equal(reread.sourceMaterial.body, 'An independently edited source collection.\n')
+  assert.equal(reread.sourceMaterial.title, 'Edited source title')
+  assert.equal(reread.materialContent.revision, work.materialContent.revision + 1)
+  const switched = await runtime.host('notes/language', { id: work.id, language: 'en', expectedContent: reread.content })
+  assert.equal(switched.status, 200, JSON.stringify(switched.value))
+  assert.equal(switched.value.state.items[0].body, 'The English accepted production.\n')
+  assert.equal(switched.value.state.items[0].sourceMaterial.body, reread.sourceMaterial.body)
+  await runtime.stop()
+  await runtime.start()
+  const cold = (await runtime.host('state')).value.state.items[0]
+  assert.equal(cold.body, switched.value.state.items[0].body)
+  assert.deepEqual(cold.sourceMaterial, reread.sourceMaterial)
+  const saved = JSON.parse(await readFile(join(data, 'state.json'), 'utf8')).items[0]
+  assert.equal(saved.body, undefined)
+  assert.equal(saved.sourceMaterial, undefined)
+  await assert.rejects(readFile(runtime.telemetryPath), { code: 'ENOENT' })
+})
+
 test('保留编辑器修改未选中的语言时，可核对和选择该版本而不改变当前语言', { timeout: 180000 }, async t => {
   const runtime = await nativeRuntime(t)
   const data = join(runtime.home, 'media-desk')

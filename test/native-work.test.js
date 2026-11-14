@@ -119,6 +119,7 @@ test('提交候选后模型失败不接受正式策划，不重放后续阶段',
   assert.equal(state.nativeRequests.length, 1)
   assert.equal(state.items.find(row => row.id === 'seed_2').body, original)
   assert.ok(!state.receipts.some(row => row.resultKey === 'stage:' + state.nativeRequests[0].id))
+  assert.equal((await runtime.host('native/retry', { id: state.nativeRequests[0].id })).value.code, 'native/stage-stale')
   const stored = JSON.parse(await readFile(join(runtime.home, 'media-desk', 'state.json'), 'utf8'))
   assert.equal(stored.nativeRequests[0].candidate, undefined)
 })
@@ -157,6 +158,7 @@ test('重复成稿只受理一次；开始新对话停止候选轮次并保留�
   const state = (await runtime.host('state')).value.state
   assert.equal(state.nativeRequests.length, 1)
   assert.equal(state.nativeRequests[0].status, 'cancelled')
+  assert.equal((await runtime.host('native/retry', { id: state.nativeRequests[0].id })).value.code, 'native/stage-stale')
   assert.equal(state.items.find(row => row.id === 'seed_2').body, original)
   assert.ok(!state.receipts.some(row => row.resultKey === 'stage:' + state.nativeRequests[0].id))
 })
@@ -178,15 +180,27 @@ test('真实 Host 并发脚本与 HTTP 图片，单图失败保留其他成果�
   t.after(async () => { releaseImages(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   const plan = { title: 'Sibling consistency', coverText: 'Evidence', facts: ['One dated fact'], outline: ['Evidence'], cover: 'A plain cover', characters: '', images: [{ caption: 'Evidence', anchor: 'Evidence', prompt: 'FAIL_ONE' }], shots: [{ shot: 'Medium', visual: 'Paper', voice: 'One dated fact', seconds: 4, prompt: 'A paper storyboard' }], sources: [{ title: 'Fixture evidence', reference: 'raw/source.md', date: '2026-11-12', limitations: 'Fixture only' }] }
-  const runtime = await nativeRuntime(t, { recipes: {
+  const recipes = {
     MD_STAGE_plan: { calls: [read, { name: 'media_desk_submit_result', arguments: { stageId: '$stageId', result: JSON.stringify(plan) } }], reply: 'Plan submitted.' },
     MD_STAGE_article: { calls: [read, { name: 'media_desk_submit_result', arguments: { stageId: '$stageId', result: JSON.stringify({ article: '## Evidence\n\nOne dated fact.', sources: plan.sources }) } }], reply: 'Article submitted.' },
-  } })
+  }
+  const runtime = await nativeRuntime(t, { recipes })
+  const barrier = { at: 0, enteredPath: join(runtime.root, 'article-entered'), releasePath: join(runtime.root, 'article-release'), abortedPath: join(runtime.root, 'article-aborted'), settledPath: join(runtime.root, 'article-settled') }
+  recipes.MD_STAGE_article.barrier = barrier
   await runtime.start()
   await runtime.host('notes/migrate', {})
   await runtime.host('settings', { imageCount: 1, shotCount: 1, image: { baseUrl: 'http://127.0.0.1:' + server.address().port, model: 'fixture-image', apiKey: 'private-fixture-key' } })
   await runtime.host('produce', { id: 'seed_2' })
+  const planned = await waitState(runtime, state => state.nativeRequests?.some(row => row.kind === 'article' && row.status === 'running'))
+  const attemptId = planned.items.find(row => row.id === 'seed_2').production.attemptId
+  assert.equal((await runtime.host('produce', { id: 'seed_2' })).value.started, false)
+  assert.equal((await runtime.host('state')).value.state.nativeRequests.length, 2)
+  await writeFile(barrier.releasePath, 'release\n')
   const writing = await waitState(runtime, state => state.items.find(row => row.id === 'seed_2').production?.nativeStageId)
+  assert.equal((await runtime.host('produce', { id: 'seed_2' })).value.started, false)
+  const repeated = (await runtime.host('state')).value.state
+  assert.equal(repeated.nativeRequests.length, 2)
+  assert.equal(repeated.items.find(row => row.id === 'seed_2').production.attemptId, attemptId)
   assert.ok(writing.items.find(row => row.id === 'seed_2').production.cover.status !== 'done')
   releaseImages()
   const partial = await waitState(runtime, state => state.items.find(row => row.id === 'seed_2').production?.status === 'partial')

@@ -23,20 +23,20 @@ kind: "package-bundle"
 <a id="use-this-package"></a>
 ## 使用此包
 
-在已构建的源码检出中，安装到独立的 DSH `0.2.2-rc.1` Web profile，再打开 DSH 输出的地址：
+将固定 Git 发布包安装到独立的 DSH `0.2.2-rc.1` Web profile，再打开 DSH 输出的地址。发布包包含已构建的浏览器入口：
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add "link:$PWD"
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.1
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
-从侧栏打开「自媒体工作台」。安装包包含 Host 入口和浏览器产物。上游 npm 包与本 fork 共用面板 ID、路由和数据；同一个 profile 只启用其中一个。工作台状态和设置保存在 `<DSH_HOME>/media-desk/`，默认 home 为 `~/.dsh`；已登记的作品文字位于 Wiki Notes。[使用指南](GUIDE.md)（[中文](GUIDE.zh.md)）说明五个视图、原生输入、图片、恢复和文件导出。
+从侧栏打开「自媒体工作台」。安装包包含 Host 入口和浏览器产物。上游 npm 包与本 fork 共用面板 ID、路由和数据；同一个 profile 只启用其中一个。工作台状态和设置保存在 `<DSH_HOME>/media-desk/`，默认 home 为 `~/.dsh`；已登记的作品文字位于 Wiki Notes。[使用指南](GUIDE.zh.md)说明五个视图、原生输入、图片、恢复和文件导出。
 
 <a id="native-conversations"></a>
 ### 原生会话
 
-内嵌助手显示 DSH 普通会话，提供原生输入、模型选择、工具历史、问答和批准。**全局原生会话**与**原生会话**入口也会在工作区打开同一个 Session。新作品 Session 使用作品标题；全局 Session 使用独立的助手标题。原生重命名会保留。关闭工作台或重启 DSH 后仍保留关联的 Session，可以从工作台或原生工作区树重新打开。
+内嵌助手显示 DSH 普通会话，提供原生输入、模型选择、工具历史、问答和批准。旁边显示当前关联会话最近的至多四条已接受作品回执，点击回执可打开对应作品。**全局原生会话**与**原生会话**入口也会在工作区打开同一个 Session。新作品 Session 使用作品标题；全局 Session 使用独立的助手标题。开始新对话会停止活动工作，保留已结算的脚本与媒体。原生重命名会保留。关闭工作台或重启 DSH 后仍保留关联的 Session，可以从工作台或原生工作区树重新打开。
 
 新关联使用现有的 `WIKI_PATH` 目录，未设置时使用 `~/wiki`。Host 配置 `wikiPath` 覆盖该选择。Wiki 同时确定工作区和 `<Wiki>/notes` 根目录；已登记作品的首个 Session 也沿用作品保存的 Wiki。环境变化后，作品和 Session 保留各自保存的根目录，包括使用符号链接的 Notes 目录。缺失的已保存 Wiki 不会被重建。修改原生工作区或 preset 后，需要恢复绑定的 Wiki 和 Media Desk preset，才能再次从工作台打开。
 
@@ -47,9 +47,9 @@ dsh --profile media-desk-dev --port 0 --no-open
 
 新作品使用 `notes/works/<work-id>-<language>.md`，未知语言记为 `und`。「正文」格子直接读取和编辑已登记的 Markdown，尚未成稿时也可使用。点击「直接修改」，再点击「保存」；格子显示相对文件位置和内容版本。保存草稿或接受成稿文字时，选择其作为同一份当前正文。非当前草稿与固定 AI 原稿使用 `notes/history/<work-id>/`。
 
-收藏来源与明确选中的作者样文使用 `notes/materials/*.md`。元数据记录来源、采集日期、稳定的外部身份、材料类型，以及正文是完整来源还是摘录。只有创建自定义风格时明确选中的材料提供个人文风依据。自定义风格、写作规则和个人语气分别使用 `notes/preferences/styles/*.md`、`notes/preferences/rules/*.md` 与 `notes/preferences/voice.md`。内置风格预设仍随包提供。
+收藏来源与明确选中的作者样文使用 `notes/materials/*.md`。元数据记录来源、采集日期、稳定的外部身份、材料类型，以及正文是完整来源还是摘录。导入条目作为作品使用时，收藏来源与可编辑作品正文分别保留。只有创建自定义风格时明确选中的材料提供个人文风依据。自定义风格、写作规则和个人语气分别使用 `notes/preferences/styles/*.md`、`notes/preferences/rules/*.md` 与 `notes/preferences/voice.md`。内置风格预设仍随包提供。
 
-Store 保存 Notes 引用、规则启用状态和结构化成稿元数据，不保存可编辑文字副本。读取和编辑投影 Notes 的当前字节。每次成稿记录当时启用的自定义风格、规则和个人语气的固定快照，之后的外部编辑不会改变该次尝试的输入。导出的 `media-desk-voice` skill 只按导出时启用的自定义风格与规则重建。
+Store 保存 Notes 引用、规则启用状态和结构化成稿元数据，不保存可编辑文字副本。读取和编辑投影 Notes 的当前字节。每次成稿记录当时启用的自定义风格、规则和个人语气的固定快照，之后的外部编辑不会改变该次尝试的输入。明确导出后，`media-desk-voice` skill 随当前启用的自定义风格与规则的已接受变更同步。待保存候选保留已接受偏好文字；停用或删除规则会从导出中移除该规则。
 
 已有作品可点击「登记作品文件」，明确选择相对其 Notes 目录的 `works/*.md` 路径。已保存 Session 的 Wiki 优先于当前默认目录。文件头须使用表单显示的作品身份及所声明的语言：
 
@@ -73,7 +73,7 @@ Editable Markdown body.
 
 每个 Host 在初始化 Store、Settings 或 Notes 前，协作锁定规范化的数据目录及所有已保存或选中的 Notes 根目录。共享任一目录的另一个 Host 保持不可用且不初始化内容，其他插件仍可使用。正常停用插件时，先取消所属工作，等待写入和外部清理完成，再释放所有权。使用此布局前须停止旧版本，它们不参与这些锁。
 
-点击工作台顶部的「恢复保存与迁移」，在备份验证后将旧作品、已保存语言版本、收藏材料和可编辑写作偏好迁入 Notes。迁移会从 Store 和 `settings.json` 删除这些可编辑文字；无关 Wiki 笔记保持不变。「作品语言」选择器在保留的版本之间切换。保存失败会保留候选；重试返回原接受回执，不重新生成。冲突核对可保留当前正文或采用保留的外部版本。撤销还原所属作品编辑并保留后来的不重叠修改。迁移、修复和离线回滚见 [Notes 恢复](GUIDE.md#notes-recovery)（[中文](GUIDE.zh.md#notes-recovery)）。
+点击工作台顶部的「恢复保存与迁移」，在备份验证后将旧作品、已保存语言版本、收藏材料和可编辑写作偏好迁入 Notes。迁移会从 Store 和 `settings.json` 删除这些可编辑文字；无关 Wiki 笔记保持不变。「作品语言」选择器在保留的版本之间切换。保存失败会保留候选；重试返回原接受回执，不重新生成。冲突核对可保留当前正文或采用保留的外部版本。撤销还原所属作品编辑并保留后来的不重叠修改。迁移、修复和离线回滚见 [Notes 恢复](GUIDE.zh.md#notes-recovery)。
 
 <a id="development"></a>
 ## 开发
@@ -86,6 +86,8 @@ pnpm run typecheck
 pnpm run build
 pnpm test
 ```
+
+本地开发使用 `dsh plugin --profile media-desk-dev add "link:$PWD"` 安装已构建的检出，再重启开发进程并硬刷新浏览器。
 
 上游源码使用 JavaScript。`typecheck` 检查 `src`、`scripts` 和 `test` 中的 JavaScript 语法，构建解析浏览器 JSX；这些命令不提供静态类型检查。构建产物 `dist/client.js` 随 Git 提交，使远程安装无需生命周期构建；浏览器源码变化后必须重新生成。保留 npm 锁文件供上游工作流使用，父仓库使用 pnpm。
 
@@ -108,7 +110,7 @@ pnpm test
 <a id="further-exploration"></a>
 ## 进一步阅读
 
-- [上游项目](https://github.com/woniuniuniu/dsh-media-desk)与[使用指南](GUIDE.md)（[中文](GUIDE.zh.md)）。
+- [上游项目](https://github.com/woniuniuniu/dsh-media-desk)与[使用指南](GUIDE.zh.md)。
 - [DSH Creative 交接](https://github.com/winterhuan/dsh-creative/blob/develop/HANDOFF.md)说明子模块归属和 profile 操作。
 - [MIT 许可](LICENSE)，包含上游版权声明。
 
@@ -133,11 +135,11 @@ pnpm test
 
 #### 模型看到什么
 
-原生 Agent 通过[业务工具](src/native-context.js)读取有界作品、冻结写作偏好、选定材料和指标。普通编辑须满足实际 Session 归属与当前 Notes 版本；选段也保留选择时版本。结构化策划、脚本、风格和规则候选须匹配已持久成功的原生轮次。Host 图片任务消费已接受策划；生图工具仅接收图片提示词，不接收文字模型凭据。
+原生 Agent 通过[业务工具](src/native-context.js)读取有界作品、保留草稿引用、冻结写作偏好、选定材料和指标。普通编辑须满足实际 Session 归属与当前 Notes 版本；选段也保留选择时版本。`media_desk_edit` 的 `revise_production` 操作须匹配当前尝试，修改选中的 Notes 正文或有界画面描述，并返回供 `media_desk_produce` 显式重画的目标。同一结果身份与相同参数返回已保存回执；不同参数报告冲突。结构化策划、脚本、风格和规则候选须匹配已持久成功的原生轮次。Host 图片任务消费已接受策划；生图工具仅接收图片提示词，不接收文字模型凭据。
 
 #### Token 影响
 
-较长读取使用继续偏移量。策划与写作在保留的作品 Session 中使用独立原生轮次。风格提炼使用明确选定的样文；规则仍为可审查提案。图片请求使用独立配置的后端。
+较大读取返回完整对象 JSON 文字的分片及 `nextOffset`，连续分片可以还原对象。限制按分片字符计数，响应另加有界分页字段。策划与写作在保留的作品 Session 中使用独立原生轮次。风格提炼使用明确选定的样文；规则仍为可审查提案。图片请求使用独立配置的后端。
 
 #### KV Cache 影响
 

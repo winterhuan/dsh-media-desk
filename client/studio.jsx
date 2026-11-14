@@ -81,6 +81,7 @@ function ProgressCard({ production, live, settings }) {
   const shots = production.shots ?? []
   const count = list => list.filter(a => a.src).length
   const planned = production.stage !== 'brief'
+  const waiting = production.pendingInput?.length > 0
   const steps = [
     { label: t('标题和封面字'), done: planned, active: !planned },
     { label: production.article ? t('脚本 {n} 字', { n: words, s: plural(words, '', 's') }) : words ? t('正在写 {n} 字', { n: words, s: plural(words, '', 's') }) : t('脚本'), done: Boolean(production.article), active: planned && !production.article },
@@ -91,10 +92,11 @@ function ProgressCard({ production, live, settings }) {
   ]
   return (
     <div className="md-progress-card">
+      {waiting ? <p className="md-idea-hint">{production.pendingInput.includes('approval') ? t('请在对话中批准或拒绝操作') : t('请在对话中回答问题')}</p> : null}
       {steps.map((step, index) => (
-        <div key={index} className={`md-progress-step ${step.done ? 'is-done' : step.active && running ? 'is-active' : ''}`}>
+        <div key={index} className={`md-progress-step ${step.done ? 'is-done' : step.active && running && (!waiting || index > 1) ? 'is-active' : ''}`}>
           <i>{step.done ? <Icon name="check" size={10} stroke={2.6} /> : null}</i>
-          <span>{step.active && running ? <span className="md-shimmer">{step.label}</span> : step.label}</span>
+          <span>{step.active && running && (!waiting || index > 1) ? <span className="md-shimmer">{step.label}</span> : step.label}</span>
         </div>
       ))}
       {running ? <button type="button" className="md-link-btn" onClick={() => cancelProduce(production.id)}>{t('取消')}</button> : null}
@@ -155,8 +157,9 @@ function HeroTile({ item, live, onView }) {
   const production = item.production
   const running = production?.status === 'running'
   const liveTitle = production?.stage === 'brief' && live?.title ? unescapeJson(live.title) : null
-  const title = liveTitle ?? production?.title ?? item.title
-  const words = textLength(production?.article || live?.text || '')
+  const title = liveTitle ?? (item.content ? item.title : production?.title ?? item.title)
+  const article = item.content ? item.body : production?.article
+  const words = textLength(article || live?.text || '')
   const shots = production?.shots ?? []
   const seconds = shots.reduce((sum, shot) => sum + (shot.seconds ?? 0), 0)
   const images = production?.images ?? []
@@ -165,7 +168,7 @@ function HeroTile({ item, live, onView }) {
   const showFigures = settings?.imageReady || images.some(a => a?.src)
   const [saving, setSaving] = React.useState(false)
   const copy = async () => {
-    await navigator.clipboard.writeText(`# ${production.title}\n\n${production.article}`)
+    await navigator.clipboard.writeText(`# ${item.title || production.title}\n\n${article}`)
     toast(t('脚本已复制'))
   }
   const save = async () => {
@@ -194,7 +197,7 @@ function HeroTile({ item, live, onView }) {
         </div>
         {done ? (
           <div className="md-hero-actions">
-            <button type="button" className="md-pill is-primary" onClick={copy}><Icon name="copy" size={14} />{t('复制脚本')}</button>
+            <button type="button" className="md-pill is-primary" onClick={copy} disabled={typeof article !== 'string'}><Icon name="copy" size={14} />{t('复制脚本')}</button>
             <button type="button" className="md-pill" onClick={save} disabled={saving}><Icon name="save" size={14} />{saving ? t('保存中…') : t('保存')}</button>
             <button type="button" className="md-pill" onClick={() => downloadCover({ src: production.cover?.src, text: production.coverText || production.title }, production.title).catch(err => toast(err.message, { error: true }))}><Icon name="image" size={14} />{t('下载封面')}</button>
             <label className="md-pill md-date-pill">
@@ -573,7 +576,7 @@ const DONE_SUGGESTIONS = ['标题再短一点', '语气轻松一点', '开场再
  * @param {(sessionId: string) => void} props.openSession - Open the bound ordinary Session page.
  * @returns {React.ReactElement|null} Selected work, or null while none is open.
  */
-export function Studio({ openSession, retainSession, renderConversation, initializeDraft }) {
+export function Studio({ openSession, retainSession, SessionProvider, renderSlot, initializeDraft }) {
   const id = useDesk(s => s.focusId)
   const item = useDesk(s => s.state?.items.find(i => i.id === s.focusId))
   const origin = useDesk(s => s.sheetOrigin)
@@ -622,7 +625,7 @@ export function Studio({ openSession, retainSession, renderConversation, initial
     <div className={`md-studio ${chatOpen ? 'chat-open' : ''}`} ref={ref} role="dialog" aria-label={t('灵感')}>
       <div className="md-studio-chat">
         <ChatPanel
-          retainSession={retainSession} renderConversation={renderConversation} initializeDraft={initializeDraft}
+          retainSession={retainSession} SessionProvider={SessionProvider} renderSlot={renderSlot} initializeDraft={initializeDraft}
           itemId={item.id}
           head={(
             <>

@@ -1,13 +1,14 @@
 /** Media publication and export operate on the actual owned Store and Notes files. */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, mkdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WriteOwner } from '../src/write-owner.js'
 import { Store } from '../src/store.js'
 import { Notes } from '../src/notes.js'
 import { MediaFiles } from '../src/media-files.js'
+import { Producer } from '../src/produce.js'
 import { saveProduction } from '../src/export.js'
 
 const PNG = Buffer.from('89504e470d0a1a0a000000000000ff80', 'hex')
@@ -39,6 +40,84 @@ test('图片以 Notes 单一主文件接受，重复保存返回同一回执且�
   assert.equal(repeated.acceptance.resultKey, 'media:' + saved.id)
   assert.equal((await store.read()).receipts.filter(row => row.resultKey === 'media:' + saved.id).length, 1)
   await assert.rejects(media.save('seed_2', 'cover', { buffer: PNG, ext: '.png' }, { attemptId: 'retired', renderId: 'render-one' }), /no longer current/)
+})
+
+for (const boundary of ['journal', 'candidate']) test('已接受图片的私有 ' + boundary + ' 清理失败保留成功状态和同一回执', async t => {
+  const { store } = await fixture(t)
+  const errors = []
+  const media = new MediaFiles(store, { onError: error => errors.push(error) })
+  let requests = 0, id, blocked, retained, originalReceipt
+  const producer = new Producer({ store, settings: {}, native: {}, generate: async () => { requests++; return { buffer: PNG, ext: '.png' } } })
+  producer.media = media
+  t.after(() => producer.close())
+  const mutate = store.mutate.bind(store)
+  store.mutate = async (label, change, options) => {
+    const result = await mutate(label, change, options)
+    if (!id && options?.resultKey?.startsWith('media:')) {
+      id = options.resultKey.slice('media:'.length)
+      originalReceipt = JSON.parse(await readFile(store.file, 'utf8')).receipts.find(row => row.resultKey === options.resultKey)
+      blocked = join(media.root, id, boundary === 'journal' ? 'pending.json' : 'candidate.png')
+      retained = blocked + '.retained'
+      await rename(blocked, retained)
+      await mkdir(blocked)
+    }
+    return result
+  }
+  await producer.renderAsset('seed_2', 'cover', { image: {} }, undefined, 'attempt-one')
+  const disk = JSON.parse(await readFile(store.file, 'utf8'))
+  assert.equal(disk.items.find(row => row.id === 'seed_2').production.cover.status, 'done')
+  assert.deepEqual(disk.receipts.find(row => row.resultKey === 'media:' + id), originalReceipt)
+  assert.equal(errors.length, 1)
+  assert.ok(errors[0].code)
+  await rm(blocked, { recursive: true })
+  await rename(retained, blocked)
+  assert.deepEqual(await readFile(await media.resolve(id)), PNG)
+  await store.mutate('Repair an earlier failed accepted image', draft => {
+    Object.assign(draft.items.find(row => row.id === 'seed_2').production.cover, { status: 'failed', error: 'Earlier cleanup failure', pendingId: id })
+  }, { undoable: false })
+  const repeated = await media.retry(id)
+  const repaired = (await store.read()).items.find(row => row.id === 'seed_2').production.cover
+  assert.equal(repaired.status, 'done')
+  assert.equal(repaired.pendingId, undefined)
+  assert.equal(repaired.error, null)
+  assert.equal(repeated.acceptance.id, originalReceipt.id)
+  assert.deepEqual(JSON.parse(await readFile(store.file, 'utf8')).receipts.find(row => row.resultKey === 'media:' + id), originalReceipt)
+  assert.deepEqual(await media.saves(), [])
+  assert.equal((await store.read()).receipts.filter(row => row.resultKey === 'media:' + id).length, 1)
+  assert.equal(requests, 1)
+})
+
+test('媒体回执后的 Notes 索引 EIO 保留图片成功状态并报告原始错误', async t => {
+  const { store } = await fixture(t)
+  const errors = []
+  const media = new MediaFiles(store, { onError: error => errors.push(error) })
+  let requests = 0, receipt
+  const producer = new Producer({ store, settings: {}, native: {}, generate: async () => { requests++; return { buffer: PNG, ext: '.png' } } })
+  producer.media = media
+  t.after(() => producer.close())
+  const syncIndex = store.notes.syncIndex.bind(store.notes)
+  store.notes.syncIndex = async state => {
+    const accepted = store.state.receipts?.find(row => row.resultKey.startsWith('media:'))
+    if (accepted && !receipt) {
+      receipt = JSON.parse(await readFile(store.file, 'utf8')).receipts.find(row => row.id === accepted.id)
+      throw Object.assign(new Error('Injected Notes index EIO after media acceptance'), { code: 'EIO' })
+    }
+    return syncIndex(state)
+  }
+  await producer.renderAsset('seed_2', 'cover', { image: {} }, undefined, 'attempt-one')
+  const state = await store.read()
+  const cover = state.items.find(row => row.id === 'seed_2').production.cover
+  assert.equal(cover.status, 'done')
+  assert.equal(cover.error, null)
+  assert.equal(cover.pendingId, undefined)
+  assert.deepEqual(await readFile(await media.resolve(cover.media.id)), PNG)
+  assert.equal(errors.length, 1)
+  assert.equal(errors[0].code, 'EIO')
+  assert.deepEqual(JSON.parse(await readFile(store.file, 'utf8')).receipts.find(row => row.id === receipt.id), receipt)
+  assert.equal(state.receipts.filter(row => row.resultKey === receipt.resultKey).length, 1)
+  assert.equal((await media.retry(cover.media.id)).acceptance.id, receipt.id)
+  assert.deepEqual(await media.saves(), [])
+  assert.equal(requests, 1)
 })
 
 test('媒体目录符号链接不发布到 Wiki 外，修复后只重试原候选并拒绝取消后的候选', async t => {

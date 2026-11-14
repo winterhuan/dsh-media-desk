@@ -23,20 +23,20 @@ Capture ideas, edit registered work Markdown directly in Wiki Notes, produce scr
 <a id="use-this-package"></a>
 ## Use this package
 
-From a built checkout, install into a separate DSH `0.2.2-rc.1` Web profile and open the URL printed by DSH:
+Install the fixed Git release into a separate DSH `0.2.2-rc.1` Web profile and open the URL printed by DSH. The release includes the built browser entry:
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add "link:$PWD"
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.1
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
-Open Media Desk in the sidebar. The package includes its Host entry and browser bundle. The upstream npm package and this fork share panel IDs, routes and data; enable only one in a profile. Workbench state and settings stay under `<DSH_HOME>/media-desk/`, with `~/.dsh` as the default home; registered work text lives in Wiki Notes. The [user guide](GUIDE.md) ([中文](GUIDE.zh.md)) explains the five views, native input, images, recovery and file export.
+Open Media Desk in the sidebar. The package includes its Host entry and browser bundle. The upstream npm package and this fork share panel IDs, routes and data; enable only one in a profile. Workbench state and settings stay under `<DSH_HOME>/media-desk/`, with `~/.dsh` as the default home; registered work text lives in Wiki Notes. The [user guide](GUIDE.md) explains the five views, native input, images, recovery and file export.
 
 <a id="native-conversations"></a>
 ### Native conversations
 
-The embedded assistant renders the ordinary DSH conversation with native input, model selection, tool history, questions and approvals. **Global native session** and **Native session** also open that same Session in the workspace. A new work Session uses the work's title; the global Session has a separate assistant title. Native renames are preserved. Closing the workbench or restarting DSH preserves the associated Session; reopen it from the workbench or native workspace tree.
+The embedded assistant renders the ordinary DSH conversation with native input, model selection, tool history, questions and approvals. Up to four recent accepted work receipts from the bound conversation appear beside it; select a receipt to open its work. **Global native session** and **Native session** also open that same Session in the workspace. A new work Session uses the work's title; the global Session has a separate assistant title. Starting a new conversation stops active work and preserves settled scripts and media. Native renames are preserved. Closing the workbench or restarting DSH preserves the associated Session; reopen it from the workbench or native workspace tree.
 
 A new association uses the existing `WIKI_PATH` directory, or `~/wiki` when unset. Host configuration `wikiPath` overrides that choice. The Wiki determines the workspace and `<Wiki>/notes` root; a registered work uses its saved Wiki even for its first Session. Saved work and Session roots survive an environment change, including a symlinked Notes directory. Missing saved Wiki directories are not rebuilt. Changing the native workspace or preset requires restoring the bound Wiki and Media Desk preset before opening it from the workbench again.
 
@@ -47,9 +47,9 @@ The native Session's selected model controls its conversation. The saved assista
 
 New works use `notes/works/<work-id>-<language>.md`, with `und` for an unknown language. The **Body** tile reads and edits that registered Markdown directly, including before production. Use **Edit**, then **Save**; the tile shows the relative file path and content version. Saving a draft or accepting production text selects it as the same current body. Inactive drafts and fixed AI originals use `notes/history/<work-id>/`.
 
-Collected sources and explicitly selected author samples use `notes/materials/*.md`. Their metadata records the source, collection date, stable external identity, material type and whether the text is complete or an excerpt. Only material selected while creating a custom style supplies personal-style evidence. Custom styles, writing rules and personal voice use `notes/preferences/styles/*.md`, `notes/preferences/rules/*.md` and `notes/preferences/voice.md`. Built-in style presets remain package files.
+Collected sources and explicitly selected author samples use `notes/materials/*.md`. Their metadata records the source, collection date, stable external identity, material type and whether the text is complete or an excerpt. An imported item used as a work retains its collected source separately from its editable work body. Only material selected while creating a custom style supplies personal-style evidence. Custom styles, writing rules and personal voice use `notes/preferences/styles/*.md`, `notes/preferences/rules/*.md` and `notes/preferences/voice.md`. Built-in style presets remain package files.
 
-Store keeps Notes references, rule activation and structured production metadata instead of editable text copies. Reads and edits project the current Notes bytes. A production attempt records fixed snapshots of the active custom style, active rules and personal voice, so later external edits do not change that attempt's inputs. The exported `media-desk-voice` skill is rebuilt from the custom style and rules that are active at export time.
+Store keeps Notes references, rule activation and structured production metadata instead of editable text copies. Reads and edits project the current Notes bytes. A production attempt records fixed snapshots of the active custom style, active rules and personal voice, so later external edits do not change that attempt's inputs. After explicit export, the `media-desk-voice` skill follows accepted changes to the active custom style and rules. Pending saves retain the accepted preference text; disabling or deleting a rule removes it from the export.
 
 For an existing work, choose **Register work file** and explicitly select a `works/*.md` path relative to its Notes directory. A saved Session's Wiki takes precedence over the current default. Prepare the file with the Work ID shown by the form and its declared language:
 
@@ -73,7 +73,7 @@ Only registered work files become managed works. `notes/index.md` receives this 
 
 Each Host holds cooperative locks on its canonical data directory and every saved or selected Notes root before initializing Store, Settings or Notes. Another Host sharing either directory stays unavailable without initializing content; other plugins remain usable. Normal plugin disable cancels owned work, waits for its writes and external cleanup, then releases ownership. Stop old releases before using this storage layout: they do not participate in these locks.
 
-Use **Recover saves and migrate** in the workbench header to move legacy work, saved language versions, collected material and editable writing preferences to Notes after a verified backup. The migration removes their editable text from Store and `settings.json`; unrelated Wiki notes remain unchanged. The **Work language** selector switches among retained versions. Failed saves keep their candidates; retry returns the original acceptance receipt without generating again. Conflict review lets you retain the current body or select a preserved external version. Undo reverses the accepted work edit while retaining later disjoint changes. See [Notes recovery](GUIDE.md#notes-recovery) ([中文](GUIDE.zh.md#notes-recovery)) for migration, repair and offline rollback.
+Use **Recover saves and migrate** in the workbench header to move legacy work, saved language versions, collected material and editable writing preferences to Notes after a verified backup. The migration removes their editable text from Store and `settings.json`; unrelated Wiki notes remain unchanged. The **Work language** selector switches among retained versions. Failed saves keep their candidates; retry returns the original acceptance receipt without generating again. Conflict review lets you retain the current body or select a preserved external version. Undo reverses the accepted work edit while retaining later disjoint changes. See [Notes recovery](GUIDE.md#notes-recovery) for migration, repair and offline rollback.
 
 <a id="development"></a>
 ## Development
@@ -86,6 +86,8 @@ pnpm run typecheck
 pnpm run build
 pnpm test
 ```
+
+For local development, install the built checkout with `dsh plugin --profile media-desk-dev add "link:$PWD"`, then restart the development process and hard-refresh the browser.
 
 The upstream source is JavaScript. `typecheck` checks JavaScript syntax in `src`, `scripts` and `test`; the build parses the browser JSX. These commands do not provide static type checking. Build output `dist/client.js` is committed for remote installation without lifecycle builds; regenerate it whenever browser source changes. The npm lockfile remains available for upstream development, while the parent uses pnpm.
 
@@ -108,7 +110,7 @@ The [native runtime fixture](test/fixtures/native-runtime.js) installs an isolat
 <a id="further-exploration"></a>
 ## Further Exploration
 
-- [Upstream project](https://github.com/woniuniuniu/dsh-media-desk) and [user guide](GUIDE.md) ([中文](GUIDE.zh.md)).
+- [Upstream project](https://github.com/woniuniuniu/dsh-media-desk) and [user guide](GUIDE.md).
 - [DSH Creative handoff](https://github.com/winterhuan/dsh-creative/blob/develop/HANDOFF.md) for submodule ownership and profile operations.
 - [MIT license](LICENSE), including the upstream copyright notice.
 
@@ -133,11 +135,11 @@ Native conversations use DSH's model adapter and cache behavior. Media Desk adds
 
 #### What the model sees
 
-The native Agent reads bounded registered work, frozen writing preferences, selected materials and metrics through [business tools](src/native-context.js). Ordinary edits require actual Session ownership and current Notes versions; selected passages also retain their selection version. Structured plan, article, style and rule candidates require the matched durable successful native turn. Host image workers consume the accepted plan; image tools receive image prompts and no text-model credentials.
+The native Agent reads bounded registered work, retained draft references, frozen writing preferences, selected materials and metrics through [business tools](src/native-context.js). Ordinary edits require actual Session ownership and current Notes versions; selected passages also retain their selection version. The `revise_production` operation in `media_desk_edit` requires the current attempt, revises the selected Notes text or bounded media descriptions, and returns targets for explicit `media_desk_produce` redraw. Reusing a result identity with identical arguments returns its saved receipt; different arguments conflict. Structured plan, article, style and rule candidates require the matched durable successful native turn. Host image workers consume the accepted plan; image tools receive image prompts and no text-model credentials.
 
 #### Token effect
 
-Long reads use continuation offsets. Planning and writing use separate native turns in the retained work Session. Style extraction uses explicitly selected samples, while rules remain reviewable proposals. Image requests use the independently configured backend.
+Large reads return slices of the complete object's JSON text with `nextOffset`; successive slices reconstruct the object. The limit counts slice characters, with bounded pagination fields added to the response. Planning and writing use separate native turns in the retained work Session. Style extraction uses explicitly selected samples, while rules remain reviewable proposals. Image requests use the independently configured backend.
 
 #### KV Cache effect
 

@@ -13,7 +13,7 @@ const assetAt = (production, target) => target === 'cover' ? production?.cover
 
 /** Binary candidates and their idempotent Store acceptance, owned by the Host writer. */
 export class MediaFiles {
-  constructor(store) { this.store = store; this.root = join(store.root, 'media-writes') }
+  constructor(store, { onError } = {}) { this.store = store; this.root = join(store.root, 'media-writes'); this.onError = onError }
 
   async records() {
     let ids
@@ -57,7 +57,7 @@ export class MediaFiles {
     })
   }
 
-  /** Publish a retained image without repeating an image-service request. */
+  /** Publish retained bytes; a durable receipt stays accepted if private journal cleanup fails. */
   async retry(id) {
     return this.store.run(async () => {
       const record = (await this.records()).find(row => row.id === id)
@@ -67,7 +67,23 @@ export class MediaFiles {
       const version = languageAt(work, record.language)
       const asset = assetAt(version?.production, record.target)
       const receipt = state.receipts?.find(row => row.resultKey === 'media:' + id)
-      if (receipt) return { id, accepted: true, acceptance: receipt }
+      if (receipt) {
+        const warnings = []
+        if (asset?.media?.id === id && version.content.notesRoot === record.notesRoot
+          && (version.production.attemptId ?? null) === record.attemptId && asset.renderId === record.renderId
+          && version.production.status !== 'cancelled' && (asset.status !== 'done' || asset.error || asset.pendingId)) {
+          try {
+            await this.store.mutate('核对已接受图片', draft => {
+              const current = languageAt(draft.items.find(row => row.id === record.workId), record.language)
+              const selected = assetAt(current?.production, record.target)
+              if (selected?.media?.id !== id || selected.renderId !== record.renderId || (current.production.attemptId ?? null) !== record.attemptId
+                || current.content.notesRoot !== record.notesRoot || current.production.status === 'cancelled') return
+              selected.status = 'done'; selected.error = null; delete selected.pendingId
+            }, { undoable: false })
+          } catch (error) { warnings.push(error) }
+        }
+        return this.finish(record, receipt, warnings)
+      }
       if (!version?.content || version.content.notesRoot !== record.notesRoot
         || version.production.attemptId !== record.attemptId && !(version.production.attemptId === undefined && record.attemptId === null)
         || asset?.renderId !== record.renderId || ['cancelled'].includes(version.production.status)) throw failure('Current work cannot accept this retained image')
@@ -82,7 +98,8 @@ export class MediaFiles {
       }
       record.phase = 'published'
       await writeFileAtomic(join(this.root, id, 'pending.json'), JSON.stringify(record), { mode: 0o600, dirMode: 0o700 })
-      await this.store.mutate('接受成稿图片', draft => {
+      let accepted
+      try { accepted = await this.store.mutate('接受成稿图片', draft => {
         const current = languageAt(draft.items.find(row => row.id === record.workId), record.language)
         const selected = assetAt(current?.production, record.target)
         if (!selected || selected.renderId !== record.renderId) throw failure('Media attempt changed before acceptance')
@@ -96,18 +113,32 @@ export class MediaFiles {
           if (current?.content?.notesRoot !== record.notesRoot || assetAt(current?.production, record.target)?.renderId !== record.renderId
             || (current.production.attemptId ?? null) !== record.attemptId || ['cancelled'].includes(current.production.status)) throw failure('Media attempt changed before acceptance')
           if (fingerprint(this.store.notes.readBytesSync(record, { binary: true })) !== record.sha256) throw failure('Notes media bytes changed before acceptance')
-        } })
-      record.phase = 'accepted'
-      await writeFileAtomic(join(this.root, id, 'pending.json'), JSON.stringify(record), { mode: 0o600, dirMode: 0o700 })
-      try { await unlink(join(this.root, id, 'candidate' + record.ext)) } catch (error) { if (error.code !== 'ENOENT') throw error }
-      return { id, accepted: true }
+        } }) } catch (error) {
+        const receipt = this.store.state.receipts?.find(row => row.resultKey === 'media:' + id)
+        if (!receipt) throw error
+        return this.finish(record, receipt, [error])
+      }
+      return this.finish(record, accepted.acceptance)
     })
   }
 
-  /** Recover published saves only; unstarted candidates remain available for explicit retry. */
+  async finish(record, receipt, warnings = []) {
+    record.phase = 'accepted'
+    try { await writeFileAtomic(join(this.root, record.id, 'pending.json'), JSON.stringify(record), { mode: 0o600, dirMode: 0o700 }) }
+    catch (error) { warnings.push(error) }
+    try { await unlink(join(this.root, record.id, 'candidate' + record.ext)) }
+    catch (error) { if (error.code !== 'ENOENT') warnings.push(error) }
+    for (const error of warnings) this.onError?.(error)
+    return { id: record.id, accepted: true, acceptance: receipt, workId: record.workId, language: record.language, attemptId: record.attemptId,
+      ...(warnings.length ? { warnings: warnings.map(error => ({ code: error.code, message: error.message })) } : {}) }
+  }
+
+  /** Recover published or receipted saves; return their attempt identities without restarting external work. */
   async recover() {
-    for (const record of await this.records()) if (record.phase === 'published') {
-      try { await this.retry(record.id) } catch (error) {
+    const state = await this.store.read()
+    const accepted = []
+    for (const record of await this.records()) if (record.phase === 'published' || state.receipts?.some(row => row.resultKey === 'media:' + record.id)) {
+      try { accepted.push(await this.retry(record.id)) } catch (error) {
         await this.store.mutate('恢复图片保存', draft => {
           const version = languageAt(draft.items.find(row => row.id === record.workId), record.language)
           const asset = assetAt(version?.production, record.target)
@@ -115,6 +146,7 @@ export class MediaFiles {
         }, { undoable: false })
       }
     }
+    return accepted
   }
 
   /** Migrate accepted legacy files after a verified backup, preserving their original rollback bytes. */

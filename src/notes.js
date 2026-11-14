@@ -4,7 +4,6 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, rea
 import { lstat, mkdir, open, realpath, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { parseDocument, stringify } from 'yaml'
-import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { tr } from './i18n.js'
 
 const METADATA = ['title', 'tags', 'source', 'url', 'language', 'noteMetadata']
@@ -63,7 +62,7 @@ export class Notes {
       const works = state.items.filter(item => item.content?.notesRoot === root).sort((a, b) => a.id.localeCompare(b.id))
       const materials = [
         ...state.items.filter(item => item.sourceContent?.notesRoot === root).map(item => ({ id: `source:${item.id}`, title: item.title, path: item.sourceContent.relativePath })),
-        ...state.items.filter(item => item.materialContent?.notesRoot === root).map(item => ({ id: `material:${item.id}`, title: item.title, path: item.materialContent.relativePath })),
+        ...state.items.filter(item => item.materialContent?.notesRoot === root).map(item => ({ id: `material:${item.id}`, title: item.sourceMaterial?.title ?? item.title, path: item.materialContent.relativePath })),
         ...state.styles.filter(row => row.sampleContent?.notesRoot === root && !row.preset && !row.sample).map(row => ({ id: `style-samples:${row.id}`, title: `${row.name} · ${tr('作者样文')}`, path: row.sampleContent.relativePath })),
       ].sort((a, b) => a.id.localeCompare(b.id))
       const preferences = [
@@ -86,10 +85,9 @@ export class Notes {
       const next = opening ? old.slice(0, old.indexOf(start)) + section + old.slice(old.indexOf(end) + end.length)
         : old + (old.endsWith('\n') ? '\n' : '\n\n') + section + '\n'
       if (next === old) continue
-      const path = join(root, 'index.md')
       await this.createDirectory(root, '')
-      if (bytes) await writeFileAtomic(path, next, { mode: 0o600, dirMode: 0o700 })
-      else await writeFile(path, next, { flag: 'wx', mode: 0o600 })
+      const reference = { wikiRoot: this.wikiRoot, notesRoot: root, relativePath: 'index.md' }
+      await this.writes.syncIndex(reference, bytes, next, this.indexKey)
     }
   }
 
@@ -256,6 +254,7 @@ export class Notes {
   }
 
   async readPrimary(reference, id, kind = 'work') {
+    if (kind === 'index') return { bytes: await this.readBytes(reference) }
     return kind === 'work' ? this.readWork(reference, id) : this.readManaged(reference, id, kind)
   }
 
@@ -419,16 +418,44 @@ export class Notes {
     const revisionKey = `${kind}:${subjectId}`
     if (!Number.isSafeInteger(reference.revision)) reference.revision = Math.max(1, state.contentRevisions[revisionKey] ?? 0)
     try {
-      const { value, sha256, bytes } = await this.readManaged(reference, subjectId, kind)
+      if (reference.relativePath !== this.managedPath(kind, subjectId)) throw failure('notes/path-invalid', tr('Notes 内容文件路径与登记身份不符'))
+      let bytes = await this.readBytes(reference)
+      let sha256 = fingerprint(bytes)
+      const pending = this.writes?.pending(subjectId, kind)
+      const pendingFile = pending?.files.find(file => (file.subjectId ?? file.workId) === subjectId && file.kind === kind
+        && file.after.notesRoot === reference.notesRoot && file.after.relativePath === reference.relativePath)
+      const unacceptedPrimary = pendingFile && sha256 !== reference.sha256
+        && (sha256 === pendingFile.candidate.sha256 || await this.writes.isPublication(pendingFile))
+      if (unacceptedPrimary) {
+        const snapshot = pendingFile.beforeSnapshot ?? reference.snapshot
+        if (!snapshot) throw failure('notes/save-pending', tr('作品有待保存的候选，请重试保存或处理冲突'))
+        bytes = await this.readBytes(snapshot)
+        if (fingerprint(bytes) !== snapshot.sha256) throw failure('notes/history-invalid', tr('作品历史版本缺失或无效，请修复历史文件'))
+        sha256 = reference.sha256
+      }
+      const { value } = this.parseManaged(bytes, reference, subjectId, kind)
       if (sha256 !== reference.sha256) {
         reference.sha256 = sha256
         reference.revision = Math.max(reference.revision, state.contentRevisions[revisionKey] ?? 0) + 1
         reference.snapshot = await this.saveManagedSnapshot(reference, subjectId, kind, bytes)
       }
-      if (!reference.snapshot) reference.snapshot = await this.saveManagedSnapshot(reference, subjectId, kind, bytes)
-      reference.status = 'ready'
+      if (!reference.snapshot && !unacceptedPrimary) reference.snapshot = await this.saveManagedSnapshot(reference, subjectId, kind, bytes)
+      const conflicts = this.writes?.conflicts(subjectId, kind) ?? []
+      reference.status = conflicts.length ? 'conflict' : pending ? pending.status === 'conflict' ? 'conflict' : 'pending' : 'ready'
+      if (pending) reference.pendingId = pending.id
+      else delete reference.pendingId
       delete reference.code
       delete reference.error
+      delete reference.conflicts
+      if (pending) {
+        reference.code = pending.error?.code ?? 'notes/save-pending'
+        reference.error = pending.error ? notesSaveMessage(pending.error) : tr('作品有待保存的候选，请重试保存或处理冲突')
+      }
+      if (conflicts.length) {
+        reference.code = 'notes/displaced-conflict'
+        reference.error = tr('外部编辑器修改了保留版本，请选择要保留为正文的版本')
+        reference.conflicts = conflicts.map(conflict => ({ saveId: conflict.saveId, relativePath: conflict.reference.relativePath, sha256: conflict.observedSha256 }))
+      }
       for (const field of this.managedFields(kind)) {
         if (value[field] === undefined) delete projected[field]
         else projected[field] = structuredClone(value[field])
@@ -441,6 +468,9 @@ export class Notes {
     }
     const saved = structuredClone(reference)
     delete saved.error
+    delete saved.pendingId
+    delete saved.conflicts
+    if (['pending', 'conflict'].includes(saved.status)) { saved.status = 'ready'; delete saved.code }
     stored[referenceKey] = saved
     state.contentRevisions[revisionKey] = Math.max(state.contentRevisions[revisionKey] ?? 0, saved.revision)
   }
@@ -453,15 +483,20 @@ export class Notes {
       const reference = item.content
       if (!Number.isSafeInteger(reference.revision)) reference.revision = Math.max(1, state.notesRevisions[item.id] ?? 0)
       try {
-        let { metadata, body, sha256, bytes } = await this.readWork(reference, item.id)
+        if (!/^works\/[^/\\]+\.md$/.test(reference.relativePath)) throw failure('notes/path-invalid', tr('作品文件必须位于 Notes 的 works 目录中'))
+        const bytes = await this.readBytes(reference)
+        let sha256 = fingerprint(bytes)
+        let metadata, body
         const pending = this.writes?.pending(item.id)
-        const pendingFile = pending?.files.find(file => file.workId === item.id && file.after.relativePath === reference.relativePath)
+        const pendingFile = pending?.files.find(file => file.workId === item.id && file.after.notesRoot === reference.notesRoot && file.after.relativePath === reference.relativePath)
         const unacceptedPrimary = pendingFile && sha256 !== reference.sha256
           && (sha256 === pendingFile.candidate.sha256 || await this.writes.isPublication(pendingFile))
-        if (unacceptedPrimary && pendingFile.beforeSnapshot) {
-          ;({ metadata, body } = await this.readSnapshot(pendingFile.beforeSnapshot, item.id, reference.language))
+        if (unacceptedPrimary) {
+          const snapshot = pendingFile.beforeSnapshot ?? reference.snapshot
+          if (!snapshot) throw failure('notes/save-pending', tr('作品有待保存的候选，请重试保存或处理冲突'))
+          ;({ metadata, body } = await this.readSnapshot(snapshot, item.id, reference.language))
           sha256 = reference.sha256
-        }
+        } else ({ metadata, body } = this.parse(bytes, reference, item.id))
         if (sha256 !== reference.sha256) {
           if (reference.snapshot) {
             item.textHistory ??= []
@@ -535,7 +570,17 @@ export class Notes {
     if (projected.voice?.content) await this.hydrateManagedRow(state, state.voice, projected.voice, 'voice')
     for (let index = 0; index < projected.items.length; index++) {
       const row = projected.items[index]
-      if (row.imported && row.materialContent) await this.hydrateManagedRow(state, state.items[index], row, 'material', 'materialContent')
+      if (!row.imported || !row.materialContent) continue
+      if (!row.content) {
+        await this.hydrateManagedRow(state, state.items[index], row, 'material', 'materialContent')
+        continue
+      }
+      const stored = { materialContent: state.items[index].materialContent }
+      const material = { id: row.id, materialContent: row.materialContent }
+      await this.hydrateManagedRow(state, stored, material, 'material', 'materialContent')
+      state.items[index].materialContent = stored.materialContent
+      row.materialContent = material.materialContent
+      row.sourceMaterial = Object.fromEntries(MATERIAL_TEXT.filter(field => material[field] !== undefined).map(field => [field, material[field]]))
     }
     if (state.notesRevisions) projected.notesRevisions = structuredClone(state.notesRevisions)
     if (state.contentRevisions) projected.contentRevisions = structuredClone(state.contentRevisions)
@@ -608,7 +653,16 @@ export class Notes {
     }
     const previousItems = new Map((before.items ?? []).map(row => [row.id, row]))
     for (const row of draft.items ?? []) if (row.imported) {
-      const file = await this.prepareManagedRow(previousItems.get(row.id), row, 'material', 'materialContent')
+      const old = previousItems.get(row.id)
+      const previous = old?.sourceMaterial ? { id: old.id, ...old.sourceMaterial, materialContent: old.materialContent } : old
+      const source = row.sourceMaterial ?? previous ?? row
+      const material = row.content ? { id: row.id, materialContent: row.materialContent,
+        ...Object.fromEntries(MATERIAL_TEXT.filter(field => source[field] !== undefined).map(field => [field, source[field]])) } : row
+      const file = await this.prepareManagedRow(previous, material, 'material', 'materialContent')
+      if (row.content) {
+        row.materialContent = material.materialContent
+        row.sourceMaterial = Object.fromEntries(MATERIAL_TEXT.filter(field => material[field] !== undefined).map(field => [field, material[field]]))
+      }
       if (file) files.push(file)
     }
     for (const file of files) draft.contentRevisions[file.revisionKey] = file.after.revision
@@ -659,7 +713,7 @@ export class Notes {
   migrationPlan(state, associations = [], original = state, ids) {
     const plan = []
     for (const item of state.items) {
-      if (ids && !ids.includes(item.id) || item.imported && !item.production && !Object.keys(item.drafts ?? {}).length) continue
+      if (ids && !ids.includes(item.id) || !ids && item.imported && !item.production && !Object.keys(item.drafts ?? {}).length) continue
       const legacy = original.items.find(row => row.id === item.id) ?? item
       const language = item.content?.language ?? (['zh', 'en', 'und'].includes(legacy.language) ? legacy.language
         : legacy.sample && ['zh', 'en'].includes(original.sampleLang) ? original.sampleLang : 'und')
@@ -828,7 +882,9 @@ export class Notes {
         }
         const selected = this.selectText(item, old)
         const changed = item.body !== old.body || METADATA.some(key => JSON.stringify(item[key]) !== JSON.stringify(old[key]))
-        const versionsChanged = JSON.stringify(item.drafts) !== JSON.stringify(old.drafts) || JSON.stringify(item.production) !== JSON.stringify(old.production)
+        // Task status remains writable while creative text has a retained save candidate.
+        const versionsChanged = JSON.stringify(item.drafts) !== JSON.stringify(old.drafts)
+          || ['article', 'aiArticle', 'current'].some(key => item.production?.[key] !== old.production?.[key])
         item.content = { ...old.content }
         if (!changed && !versionsChanged) continue
         if (old.content.status !== 'ready') throw failure(old.content.code, old.content.error)
@@ -856,7 +912,8 @@ export class Notes {
         await this.projectHistory(item)
         continue
       }
-      if (old || item.sample || item.imported) continue
+      const creativeImport = item.imported && (item.production || Object.keys(item.drafts ?? {}).length)
+      if (item.sample || (old || item.imported) && !creativeImport) continue
       if (!this.canCreate) throw failure('wiki/unavailable', tr('Wiki 目录不可用：{path}。请检查 WIKI_PATH', { path: this.wikiRoot }), 503)
       const source = item.body
       this.selectText(item, null)
@@ -901,6 +958,7 @@ export class Notes {
     if (durable.voice?.content) delete durable.voice.text
     for (const item of durable.items) if (item.materialContent) {
       for (const field of MATERIAL_TEXT) delete item[field]
+      delete item.sourceMaterial
     }
     return durable
   }

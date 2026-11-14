@@ -56,6 +56,24 @@ export class NotesWrites {
     try { return await this.store.notes.readBytes(reference) } catch (error) { if (error.code === 'notes/missing') return null; throw error }
   }
 
+  /** Navigation uses the same retained inodes and exclusive publication as creative content, without a business receipt. */
+  async syncIndex(reference, beforeBytes, bytes, indexKey) {
+    const before = beforeBytes ? { ...reference, sha256: hash(beforeBytes) } : null
+    const after = { ...reference, sha256: hash(bytes) }
+    const state = { items: [] }
+    const record = await this.prepare(state, structuredClone(state), [{ kind: 'index', subjectId: `index:${indexKey}`, before, after, beforeBytes, bytes }], { label: 'Notes index', outcome: {} })
+    try {
+      await this.publish(record)
+      this.validateSync(record)
+      record.status = 'accepted'
+      await this.save(record)
+      this.validateSync(record)
+    } catch (error) {
+      await this.restoreAccepted(record, error)
+      throw Object.assign(error, { pendingId: record.id })
+    }
+  }
+
   /** A changed unaccepted publication remains a candidate even when an editor changes its bytes. */
   async isPublication(entry) {
     try {
@@ -129,14 +147,19 @@ export class NotesWrites {
   }
 
   async restore(entry) {
-    const reference = entry.restoration ?? entry.displaced
-    if (!reference || !await this.bytes(reference)) return
-    try { await link(join(reference.notesRoot, reference.relativePath), join(entry.after.notesRoot, entry.after.relativePath)) } catch (error) {
-      if (error.code !== 'EEXIST') throw error
+    const captured = entry.phase === 'restoring' && entry.rejectedPrimary && await this.bytes(entry.rejectedPrimary)
+    const references = captured && hash(captured) !== entry.candidate.sha256 ? [entry.rejectedPrimary]
+      : entry.kind === 'index' ? [entry.displaced, entry.restoration] : [entry.restoration, entry.displaced]
+    for (const reference of references) {
+      if (!reference || !await this.bytes(reference)) continue
+      try { await link(join(reference.notesRoot, reference.relativePath), join(entry.after.notesRoot, entry.after.relativePath)) } catch (error) {
+        if (error.code !== 'EEXIST') throw error
+      }
+      return
     }
   }
 
-  /** Restore a failed save's accepted preimage exclusively, retaining the actual published inode. */
+  /** Restore failed publication exclusively, retaining editor writes and original absence. */
   async restoreAccepted(record, error) {
     if (this.store.state.receipts?.some(receipt => receipt.id === record.id)) {
       record.status = 'accepted'
@@ -146,19 +169,21 @@ export class NotesWrites {
     record.error = { code: error.code ?? 'notes/save-failed', message: error.message }
     await this.save(record)
     for (const entry of record.files) {
-      if (!entry.beforeSnapshot) continue
       const primary = await this.bytes(entry.after)
-      if (!primary || hash(primary) !== entry.candidate.sha256) continue
+      if (!primary) { await this.restore(entry); continue }
+      if (hash(primary) !== entry.candidate.sha256) continue
       entry.rejectedPrimaries ??= []
       if (entry.rejectedPrimary) entry.rejectedPrimaries.push(entry.rejectedPrimary)
       entry.rejectedPrimary = { ...entry.publication, relativePath: entry.publication.relativePath.replace(/[^/]+$/, `${randomUUID()}-unaccepted.md`) }
-      entry.restoration = { ...entry.beforeSnapshot, role: 'restoration', relativePath: entry.beforeSnapshot.relativePath.replace(/[^/]+$/, `${randomUUID()}-restoration.md`) }
-      await copyFile(join(entry.beforeSnapshot.notesRoot, entry.beforeSnapshot.relativePath), join(entry.restoration.notesRoot, entry.restoration.relativePath), constants.COPYFILE_EXCL)
+      if (entry.beforeSnapshot) {
+        entry.restoration = { ...entry.beforeSnapshot, role: 'restoration', relativePath: entry.beforeSnapshot.relativePath.replace(/[^/]+$/, `${randomUUID()}-restoration.md`) }
+        const preimage = entry.kind === 'index' && await this.bytes(entry.displaced) ? entry.displaced : entry.beforeSnapshot
+        await copyFile(join(preimage.notesRoot, preimage.relativePath), join(entry.restoration.notesRoot, entry.restoration.relativePath), constants.COPYFILE_EXCL)
+      }
+      entry.phase = 'restoring'
       await this.save(record)
       await rename(join(entry.after.notesRoot, entry.after.relativePath), join(entry.rejectedPrimary.notesRoot, entry.rejectedPrimary.relativePath))
-      const captured = await this.bytes(entry.rejectedPrimary)
-      const reference = hash(captured) === entry.candidate.sha256 ? entry.restoration : entry.rejectedPrimary
-      try { await link(join(reference.notesRoot, reference.relativePath), join(entry.after.notesRoot, entry.after.relativePath)) } catch (restoreError) { if (restoreError.code !== 'EEXIST') throw restoreError }
+      await this.restore(entry)
       entry.phase = 'restored'
       await this.save(record)
     }
@@ -243,6 +268,8 @@ export class NotesWrites {
     const subjects = new Set([...record.files.map(entry => entry.subjectId ?? entry.workId), ...record.changes.filter(change => change.path[0] === 'items').map(change => change.path[1]?.id)])
     for (const saved of this.records) for (const entry of saved.files) {
       if (!subjects.has(entry.subjectId ?? entry.workId)) continue
+      // A later navigation refresh incorporates the restored editor version; earlier inodes stay retained.
+      if (entry.kind === 'index' && saved !== record) continue
       for (const reference of entry.displacements ?? []) {
         const expected = saved.resolutions?.[reference.relativePath]?.sha256 ?? reference.sha256
         if (hash(this.store.notes.readBytesSync(reference)) !== expected) {
@@ -291,7 +318,23 @@ export class NotesWrites {
   /** Recover only already published known edits; unstarted candidates require an explicit save retry. */
   async recover() {
     await this.load()
+    const indexes = new Map()
+    for (const record of [...this.records].sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
+      if (!record.files.length || !record.files.every(entry => entry.kind === 'index')) continue
+      const key = join(record.files[0].after.notesRoot, record.files[0].after.relativePath)
+      if (!indexes.has(key)) indexes.set(key, record)
+    }
+    // Only the newest index journal can restore navigation; older editor inodes remain historical evidence.
+    for (const record of indexes.values()) {
+      if (record.status === 'accepted') continue
+      for (const entry of record.files) if (!await this.bytes(entry.after)) await this.restore(entry)
+      if (['published', 'pending'].includes(record.status)) {
+        try { this.validateSync(record); record.status = 'accepted'; await this.save(record) }
+        catch (error) { await this.restoreAccepted(record, error) }
+      }
+    }
     for (const record of this.records) {
+      if (record.files.length && record.files.every(entry => entry.kind === 'index')) continue
       const receipt = this.store.state.receipts?.find(row => row.id === record.id)
       if (receipt) { record.status = 'accepted'; continue }
       if (['candidate', 'conflict', 'rejected'].includes(record.status) || record.requiresValidation) continue
@@ -310,12 +353,14 @@ export class NotesWrites {
     await this.inspect()
   }
 
-  pending(workId) {
-    return this.records.find(record => !['accepted', 'rejected'].includes(record.status) && record.files.some(file => file.workId === workId))
+  pending(subjectId, kind = 'work') {
+    return this.records.find(record => !['accepted', 'rejected'].includes(record.status)
+      && record.files.some(file => (file.subjectId ?? file.workId) === subjectId && (file.kind ?? 'work') === kind))
   }
 
-  conflicts(workId) {
-    return this.records.flatMap(record => (record.observedConflicts ?? []).filter(conflict => conflict.workId === workId).map(conflict => ({ ...conflict, saveId: record.id })))
+  conflicts(subjectId, kind = 'work') {
+    return this.records.flatMap(record => (record.observedConflicts ?? []).filter(conflict => kind === 'work'
+      ? conflict.workId === subjectId : conflict.subjectId === subjectId && conflict.kind === kind).map(conflict => ({ ...conflict, saveId: record.id })))
   }
 
   /**

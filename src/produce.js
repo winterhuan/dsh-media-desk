@@ -8,6 +8,7 @@ import { imageReady } from './settings.js'
 
 const CONCURRENCY = 3
 const RETRY_WAIT_MS = [6000, 14000]
+const languageAt = (item, language) => language === undefined || item?.content?.language === language ? item : item?.otherLang?.[language]
 
 function splitTitle(markdown, fallback) {
   const match = /^\s*#\s+(.+)\n?/.exec(markdown)
@@ -204,10 +205,14 @@ export class Producer {
     for (const [key, controller] of this.assetControllers) if (key.startsWith(id + ':')) controller.abort()
     this.jobs.get(id)?.controller.abort()
     await this.store.mutate('取消成稿', draft => {
-      for (const stage of draft.nativeRequests ?? []) if (stage.workId === id && ['pending', 'running', 'waiting', 'candidate', 'save-failed'].includes(stage.status)) stage.status = 'cancelled'
+      const stages = (draft.nativeRequests ?? []).filter(stage => stage.workId === id && ['pending', 'running', 'waiting', 'candidate', 'save-failed'].includes(stage.status))
+      for (const stage of stages) { stage.status = 'cancelled'; stage.pendingInput = [] }
       const work = draft.items.find(row => row.id === id)
-      if (work?.production) {
+      const production = work?.production
+      if (production && (stages.length || production.status === 'running' || this.anyAssetActive(id)
+        || [production.cover, ...production.images ?? [], ...production.shots ?? []].some(asset => asset && ['pending', 'running'].includes(asset.status)))) {
         work.production.status = 'cancelled'
+        work.production.pendingInput = []
         for (const asset of [work.production.cover, ...work.production.images ?? [], ...work.production.shots ?? []]) if (asset && ['pending', 'running'].includes(asset.status)) asset.status = 'cancelled'
       }
     }, { undoable: false })
@@ -243,24 +248,37 @@ export class Producer {
 
   async nativeAccepted(stage) {
     if (stage.kind === 'article') {
-      await this.complete(stage.workId)
+      await this.complete(stage.workId, { attemptId: stage.data.planId })
       return
     }
     if (stage.kind !== 'plan' || this.closing) return
     const state = await this.store.read()
     const item = state.items.find(row => row.id === stage.workId)
     if (!item?.production || item.production.attemptId !== stage.id || item.production.status !== 'running') return
-    const settings = await this.native.productionSettings(stage.id)
     const job = { stage: 'making', text: '', planText: '', controller: new AbortController(), attemptId: stage.id }
-    this.jobs.set(stage.workId, job)
     const tasks = []
     try {
+      const settings = await this.native.productionSettings(stage.id)
+      const owned = await this.store.run(async () => {
+        await this.store.refresh()
+        const current = this.store.state.items.find(row => row.id === stage.workId)?.production
+        if (this.closing || current?.attemptId !== stage.id || current.status !== 'running') return false
+        this.jobs.set(stage.workId, job)
+        return true
+      })
+      if (!owned) return
       const article = await this.native.request('article', stage.workId,
         'Write the complete Markdown script based on the accepted plan, facts and sources. Use llm-wiki to check relevant evidence. Submit article and dated sources through media_desk_submit_result.',
         { data: { planId: stage.id, preferenceVersions: stage.data.preferenceVersions, materialVersion: stage.data.materialVersion, language: stage.data.language } })
       job.articleStageId = article.id
+      const current = await this.store.read()
+      const latest = current.items.find(row => row.id === stage.workId)?.production
+      if (this.jobs.get(stage.workId) !== job || job.controller.signal.aborted || latest?.attemptId !== stage.id || latest.status !== 'running') {
+        if (this.jobs.get(stage.workId) === job) this.jobs.delete(stage.workId)
+        return
+      }
       if (this.ready(settings)) {
-        const targets = ['cover', ...item.production.images.map((_, i) => 'image:' + i), ...item.production.shots.map((_, i) => 'shot:' + i)]
+        const targets = ['cover', ...latest.images.map((_, i) => 'image:' + i), ...latest.shots.map((_, i) => 'shot:' + i)]
         let next = 0
         const worker = async () => {
           while (next < targets.length && !job.controller.signal.aborted) {
@@ -271,11 +289,15 @@ export class Producer {
       }
       const completion = this.launch(async () => {
         await Promise.allSettled(tasks)
-        await this.complete(stage.workId)
+        await this.complete(stage.workId, { attemptId: stage.id })
       }, stage.workId)
       completion.catch(error => this.onError?.(error))
     } catch (error) {
-      await this.patch(stage.workId, production => { production.status = 'failed'; production.error = error.message })
+      await this.patch(stage.workId, production => {
+        if (production.attemptId !== stage.id || production.status !== 'running') return
+        production.status = 'failed'; production.error = error.message
+      })
+      if (this.jobs.get(stage.workId) === job) this.jobs.delete(stage.workId)
     }
   }
 
@@ -289,24 +311,34 @@ export class Producer {
       production.status = production.article ? 'partial' : row?.status ?? 'failed'
       production.error = row?.error
     })
-    await this.complete(stage.workId)
+    await this.complete(stage.workId, { attemptId: stage.kind === 'plan' ? stage.id : stage.data.planId })
   }
 
-  async complete(id) {
+  /** Reconcile the selected attempt's accepted article with settled media; recovery never resumes external work. */
+  async complete(id, { recover = false, attemptId, language } = {}) {
     const state = await this.store.read()
     const item = state.items.find(row => row.id === id)
-    const production = item?.production
+    const production = languageAt(item, language)?.production
     if (!production) return
-    const article = state.nativeRequests?.find(row => row.id === production.nativeStageId && row.kind === 'article' && row.data.planId === production.attemptId)
-    const pendingArticle = state.nativeRequests?.some(row => row.workId === id && row.kind === 'article' && ['pending', 'running', 'waiting', 'candidate', 'save-failed'].includes(row.status))
-    const assets = [production.cover, ...production.images ?? [], ...production.shots ?? []].filter(Boolean)
-    if (pendingArticle || assets.some(row => ['pending', 'running'].includes(row.status))) return
-    await this.patch(id, next => {
-      if (['cancelled', 'interrupted'].includes(next.status)) return
-      next.status = article?.status === 'accepted' && !assets.some(row => ['failed', 'cancelled'].includes(row.status)) ? 'done' : next.article ? 'partial' : 'failed'
+    const expectedAttempt = attemptId === undefined ? production.attemptId : attemptId
+    const job = this.jobs.get(id)?.attemptId === expectedAttempt ? this.jobs.get(id) : null
+    const completed = await this.store.mutate('成稿', draft => {
+      const next = languageAt(draft.items.find(row => row.id === id), language)?.production
+      if (!next || (next.attemptId ?? null) !== (expectedAttempt ?? null) || next.nativeStageId !== production.nativeStageId) return false
+      const article = draft.nativeRequests?.find(row => row.id === next.nativeStageId && row.kind === 'article' && row.data.planId === next.attemptId)
+      const accepted = article?.status === 'accepted' && draft.receipts?.some(row => row.resultKey === 'stage:' + article.id)
+      if (recover && (!accepted || ['cancelled', 'failed'].includes(next.status))) return false
+      const pendingText = draft.nativeRequests?.some(row => row.workId === id && ['plan', 'article'].includes(row.kind)
+        && (row.kind === 'plan' ? row.id : row.data.planId) === next.attemptId && ['pending', 'running', 'waiting', 'candidate', 'save-failed'].includes(row.status))
+      const assets = [next.cover, ...next.images ?? [], ...next.shots ?? []].filter(Boolean)
+      if (pendingText || assets.some(row => ['pending', 'running'].includes(row.status))) return false
+      if (next.status === 'cancelled' || next.status === 'interrupted' && !recover) return false
+      next.status = accepted && assets.every(row => ['done', 'skipped'].includes(row.status)) ? 'done' : next.article ? 'partial' : 'failed'
       next.stage = 'done'; next.finishedAt = new Date().toISOString()
-    })
-    this.jobs.delete(id)
+      if (next.status === 'done') delete next.error
+      return true
+    }, { undoable: false })
+    if (this.jobs.get(id) === job && (completed || job?.controller.signal.aborted)) this.jobs.delete(id)
   }
 
   /** 生图服务限流（429）时等一会儿再试，最多再试两次；其他错误直接报。 */
@@ -357,31 +389,41 @@ export class Producer {
     }
   }
 
-  /** 单独重画一张。 */
+  /** 单独重画一张；异步准备前领取目标，重复受理复用当前任务，准备失败释放目标。 */
   async regenerate(id, target) {
     if (this.closing) throw Object.assign(new Error(tr('Media Desk 正在关闭，请稍后重试')), { status: 503 })
-    const settings = await this.settings.read()
-    if (!this.ready(settings)) throw Object.assign(new Error(tr('还没有接入生图模型')), { status: 400 })
     if (!parseTarget(target)) throw Object.assign(new Error(tr('目标无效')), { status: 400 })
     const key = `${id}:${target}`
     if (this.assets.has(key)) return
-    const state = await this.store.read()
-    const production = state.items.find(row => row.id === id)?.production
-    if (this.closing) throw Object.assign(new Error(tr('Media Desk 正在关闭，请稍后重试')), { status: 503 })
-    if (!production || !assetAt(production, target)) throw Object.assign(new Error(tr('找不到这张图')), { status: 404 })
     this.assets.add(key)
     const controller = new AbortController()
     this.assetControllers.set(key, controller)
-    await this.patch(id, (next) => { assetAt(next, target).status = 'running' })
-    const completion = this.launch(() => this.renderAsset(id, target, settings, controller.signal, production.attemptId), id)
-    const done = () => { this.assets.delete(key); this.assetControllers.delete(key); this.launch(() => this.complete(id), id) }
-    completion.then(done, done)
+    const release = () => { this.assets.delete(key); this.assetControllers.delete(key) }
+    try {
+      const settings = await this.settings.read()
+      if (!this.ready(settings)) throw Object.assign(new Error(tr('还没有接入生图模型')), { status: 400 })
+      const state = await this.store.read()
+      const production = state.items.find(row => row.id === id)?.production
+      if (this.closing) throw Object.assign(new Error(tr('Media Desk 正在关闭，请稍后重试')), { status: 503 })
+      controller.signal.throwIfAborted()
+      if (!production || !assetAt(production, target)) throw Object.assign(new Error(tr('找不到这张图')), { status: 404 })
+      await this.patch(id, (next) => {
+        controller.signal.throwIfAborted()
+        if (next.attemptId === production.attemptId) assetAt(next, target).status = 'running'
+      })
+      const completion = this.launch(() => this.renderAsset(id, target, settings, controller.signal, production.attemptId), id)
+      const done = () => { release(); this.launch(() => this.complete(id, { attemptId: production.attemptId }), id) }
+      completion.then(done, done)
+    } catch (error) { release(); throw error }
   }
 
-  /** Host 重启后，把上次没做完的成稿都标成中断，卡片不会一直显示「正在成稿」。 */
+  /** Recover accepted article/media outcomes and mark unfinished work without restarting it. */
   async settleAll() {
     const state = await this.store.read()
-    for (const item of state.items) if (item.production?.status === 'running') await this.settle(item.id)
+    for (const item of state.items) if (['running', 'interrupted'].includes(item.production?.status)) {
+      await this.settle(item.id)
+      await this.complete(item.id, { recover: true, attemptId: item.production.attemptId })
+    }
   }
 
   async settle(id) {
@@ -393,6 +435,7 @@ export class Producer {
     await this.patch(id, (next) => {
       if (next.status === 'running') {
         next.status = 'interrupted'
+        next.pendingInput = []
         next.stage = 'done'
         next.error = tr('上次成稿被中断了，可以重新开始')
       }

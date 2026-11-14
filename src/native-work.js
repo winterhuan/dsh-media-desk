@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { applyOps } from './ops.js'
 import { normalizeStyle } from './style.js'
+import { applyRevision } from './produce.js'
 import { tr } from './i18n.js'
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
@@ -23,17 +24,30 @@ export class NativeWork {
     this.agents = new Map()
     this.barriers = new Map()
     this.failedInputs = new Set()
+    this.failedWaits = new Set()
     this.recoveryPending = new Set()
+    this.waits = new Map()
   }
 
   /** Startup records uncertain work without repeating model, image or Wiki effects. */
   async init() {
     const state = await this.store.read()
-    for (const row of state.nativeRequests ?? []) if (active(row) && row.turn !== undefined) this.recoveryPending.add(row.sessionId)
-    if (!state.nativeRequests?.some(row => row.status === 'pending' && row.turn === undefined)) return
+    const interrupted = new Set()
+    for (const row of state.nativeRequests ?? []) if (active(row) && row.turn !== undefined) {
+      this.recoveryPending.add(row.sessionId)
+      const events = await this.events(row.sessionId, row.startSeq)
+      const end = events.find(event => event.type === 'turn/end' && event.data.turn === row.turn)
+      if (row.status !== 'save-failed' && (end?.data.reason.kind !== 'completed' || !row.candidateSaved && !row.candidate)) interrupted.add(row.id)
+    }
+    if (!state.nativeRequests?.some(row => active(row))) return
     await this.store.mutate('记录中断的原生受理', draft => {
-      for (const row of draft.nativeRequests ?? []) if (row.status === 'pending' && row.turn === undefined) {
-        row.status = 'interrupted'; row.error = 'Native admission was interrupted; inspect the retained Session before retrying'
+      for (const row of draft.nativeRequests ?? []) if (active(row)) {
+        row.pendingInput = []
+        if (interrupted.has(row.id) || row.status === 'pending' && row.turn === undefined) {
+          row.status = 'interrupted'; row.error = 'Native admission was interrupted; inspect the retained Session before retrying'
+        } else if (row.status === 'waiting') row.status = row.candidateSaved ? 'candidate' : 'running'
+        const production = draft.items.find(item => item.id === row.workId)?.production
+        if (production && (production.attemptId === row.id || production.attemptId === row.data.planId)) production.pendingInput = []
       }
     }, { undoable: false })
   }
@@ -59,6 +73,9 @@ export class NativeWork {
 
   /** Register native listeners before a creative Agent can consume input after cold recovery. */
   attach(ctx) {
+    for (const [event, kind] of [['user-questions/request', 'question'], ['approval/request', 'approval']]) {
+      ctx.on(event, (request, next) => this.store.owner.track(() => this.wait(request, next, kind)), { prepend: true })
+    }
     ctx.on('agent/pre-step', async (payload, next) => {
       try { await this.prepare(payload) } catch (error) {
         this.failedInputs.add(payload.agent.id)
@@ -78,6 +95,37 @@ export class NativeWork {
       await this.recover(agent)
     })
     ctx.on('agent/disposed', ({ agent }) => { this.agents.delete(agent.id) })
+  }
+
+  applyWaits(draft, sessionId) {
+    const pendingInput = [...new Set([...(this.waits.get(sessionId) ?? [])].map(row => row.kind))]
+    for (const row of draft.nativeRequests ?? []) if (row.sessionId === sessionId && row.turn !== undefined && active(row) && row.status !== 'save-failed') {
+      row.pendingInput = pendingInput
+      row.status = pendingInput.length ? 'waiting' : row.candidateSaved ? 'candidate' : 'running'
+      const production = draft.items.find(item => item.id === row.workId)?.production
+      if (production && (production.attemptId === row.id || production.attemptId === row.data.planId)) production.pendingInput = pendingInput
+    }
+  }
+
+  /** Native answerers retain authority; no Store write queue is held while the user answers. */
+  async wait(request, next, kind) {
+    const sessionId = request.agent.id
+    const token = { kind }
+    const waits = this.waits.get(sessionId) ?? new Set()
+    this.waits.set(sessionId, waits)
+    waits.add(token)
+    const record = async () => {
+      try {
+        await this.store.mutate('原生任务等待输入', draft => this.applyWaits(draft, sessionId), { undoable: false })
+        this.failedWaits.delete(sessionId)
+      } catch (error) { this.failedWaits.add(sessionId); this.ctx.logger.error(error) }
+    }
+    await record()
+    try { return await next() } finally {
+      waits.delete(token)
+      if (!waits.size) this.waits.delete(sessionId)
+      await record()
+    }
   }
 
   async prepare({ agent, messages, turn, step, modelSelection }) {
@@ -125,8 +173,11 @@ export class NativeWork {
         request.actualModels ??= []
         if (!request.actualModels.some(row => row.step === step)) request.actualModels.push({ step, ...modelSelection })
       }
+      if (this.failedWaits.has(agent.id)) this.applyWaits(draft, agent.id)
     }, { undoable: false })
-    this.failedInputs.delete(agent.id)
+    // Empty steps cannot recover a claimed input that never reached Store.
+    if (incoming.length) this.failedInputs.delete(agent.id)
+    this.failedWaits.delete(agent.id)
     for (const row of interrupted) await this.ctx.mediaDesk.producer?.nativeEnded(row)
   }
 
@@ -157,21 +208,26 @@ export class NativeWork {
       await this.finish(agent.id, request.turn, { schedule: !this.recoveryPending.has(agent.id) })
       if (this.recoveryPending.has(agent.id)) await this.store.mutate('核对中断的原生轮次', draft => {
         const row = draft.nativeRequests.find(row => row.id === request.id)
-        if (active(row) && row.status !== 'save-failed') { row.status = 'interrupted'; row.error = 'The original native turn has no durable successful result' }
+        if (active(row) && row.status !== 'save-failed') { row.status = 'interrupted'; row.pendingInput = []; row.error = 'The original native turn has no durable successful result' }
       }, { undoable: false })
     }
     this.recoveryPending.delete(agent.id)
   }
 
-  async actor(exec, write = false) {
+  async actor(exec, write = false, checkSelection = write) {
     exec.signal.throwIfAborted()
     const association = this.sessions.requireAssociation(exec.agent)
-    if (this.failedInputs.has(exec.agent.id)) throw failure('native/input-unsaved', 'Native input could not be recorded; retry after repairing storage')
+    if (this.failedInputs.has(exec.agent.id) || this.failedWaits.has(exec.agent.id)) throw failure('native/input-unsaved', 'Native input could not be recorded; retry after repairing storage')
     const state = await this.store.read()
-    const current = state.nativeInputs?.findLast(row => row.sessionId === exec.agent.id)
+    const events = await this.events(exec.agent.id)
+    const call = events.findLast(row => row.type === 'tool/call' && row.data.callId === (exec.rootCallId ?? exec.callId))
+    const start = call && events.findLast(row => row.type === 'turn/start' && row.data.turn === call.data.turn)
+    const message = start && events.findLast(row => row.type === 'user/message' && row.seq > start.seq && row.seq < call.seq && row.data.source?.kind === 'user')?.data
+    const current = message && state.nativeInputs?.findLast(row => row.sessionId === exec.agent.id && row.turn === call.data.turn
+      && row.messageId === message.id && row.fingerprint === hash(message))
     if (!current) throw failure('native/input-missing', 'No recorded native user input authorizes this operation')
     if (write && current.readOnly) throw failure('native/read-only', 'This input permits reading only', 403)
-    if (write) this.store.notes.assertExpected(state, current.selectionVersions ?? {})
+    if (checkSelection) this.store.notes.assertExpected(state, current.selectionVersions ?? {})
     return { association, state, current }
   }
 
@@ -189,20 +245,22 @@ export class NativeWork {
       const work = state.items.find(row => row.id === workId)
       if (!work) {
         if (workId !== null) throw failure('native/work-missing', 'Work not found', 404)
-        return { works: state.items.slice(0, 80).map(row => ({ id: row.id, title: row.title, status: row.status, content: row.content })),
-          stage: this.currentStage(state, association) }
+        return page({ works: state.items.map(row => ({ id: row.id, title: row.title, status: row.status, content: row.content })),
+          stage: this.currentStage(state, association) })
       }
       const stage = this.currentStage(state, association)
       const production = work.production && { ...work.production, article: undefined, aiArticle: undefined }
-      const drafts = Object.fromEntries(Object.entries(work.drafts ?? {}).map(([key, row]) => [key, { aiVersion: row.aiVersion, version: row.version }]))
-      return { id: work.id, title: work.title, kind: work.kind, status: work.status, content: work.content, production, drafts, url: work.url, source: work.source, tags: work.tags,
+      const drafts = Object.fromEntries(Object.entries(work.drafts ?? {}).map(([key, row]) => [key, { aiVersion: row.aiVersion, version: row.textVersion }]))
+      return page({ id: work.id, title: work.title, kind: work.kind, status: work.status, content: work.content, production, drafts, url: work.url, source: work.source, tags: work.tags,
         sourceContent: work.sourceContent, materialContent: work.materialContent, sources: work.noteMetadata?.sources,
         people: state.people.filter(row => work.personaIds?.includes(row.id)), angles: state.angles.filter(row => work.angleIds?.includes(row.id)),
-        body: work.body?.slice(offset, offset + limit), truncated: (work.body?.length ?? 0) > offset + limit,
-        nextOffset: (work.body?.length ?? 0) > offset + limit ? offset + limit : null, stage }
+        body: work.body, stage })
     }
     if (kind === 'preferences') {
       const stage = state.nativeRequests?.findLast(row => row.associationId === association.id && active(row))
+      if (association.workId === null) return page({ voice: state.voice, activeStyleId: state.activeStyleId,
+        styles: state.styles.filter(row => !row.sample).map(({ samples, sampleContent, sampleMaterial, ...style }) => style),
+        rules: state.skills.filter(row => !row.sample), stage: this.currentStage(state, association) })
       if (stage?.data.preferenceVersions) {
         const refs = stage.data.preferenceVersions
         const load = async reference => {
@@ -215,11 +273,11 @@ export class NativeWork {
         return page({ voice: await load(refs.voice), style: await load(refs.style), rules: await Promise.all(refs.rules.map(load)), stage: this.currentStage(state, association) })
       }
       return page({ voice: state.voice, activeStyleId: state.activeStyleId,
-      styles: state.styles.filter(row => row.id === state.activeStyleId), rules: state.skills.filter(row => !row.sample && ['active', 'exported'].includes(row.status)).slice(0, 24),
+      styles: state.styles.filter(row => row.id === state.activeStyleId), rules: state.skills.filter(row => !row.sample && ['active', 'exported'].includes(row.status)),
       stage: this.currentStage(state, association) })
     }
-    if (kind === 'materials') return page({ materials: state.items.filter(row => row.materialContent).slice(0, 80).map(row => ({ id: row.id, title: row.title, source: row.source, materialContent: row.materialContent })), stage: this.currentStage(state, association) })
-    if (kind === 'metrics' && association.workId === null) return page({ metrics: state.metrics.slice(-100), accounts: state.accounts })
+    if (kind === 'materials') return page({ materials: state.items.filter(row => row.materialContent).map(row => ({ id: row.id, title: row.sourceMaterial?.title ?? row.title, source: row.sourceMaterial?.source ?? row.source, materialContent: row.materialContent })), stage: this.currentStage(state, association) })
+    if (kind === 'metrics' && association.workId === null) return page({ metrics: state.metrics, accounts: state.accounts })
     throw failure('native/read-kind', 'Unsupported reading scope', 400)
   }
 
@@ -232,49 +290,146 @@ export class NativeWork {
       selectedMaterial: stage.data.sampleMaterial, planId: stage.data.planId, language: stage.data.language, materialVersion: stage.data.materialVersion }
   }
 
-  /** Apply whitelisted ordinary operations immediately, using only the actual Agent's owned objects. */
+  /** Apply current, owned edits; changed media prompts invalidate old renders and return targets for explicit redraw. */
   async edit(exec, { operations, expectedContent = {}, expectedPreferences = {}, resultId }) {
     return this.store.run(async () => {
-      const { association, state, current } = await this.actor(exec, true)
+      const { association, state: observed, current } = await this.actor(exec, true, false)
       if (!Array.isArray(operations) || !operations.length || operations.length > 24 || JSON.stringify(operations).length > 200000) throw failure('native/operations-invalid', 'Provide 1–24 bounded operations', 400)
-      const workOps = new Set(['update_item', 'delete_item', 'schedule_item', 'set_status', 'save_draft', 'update_production'])
+      const workOps = new Set(['update_item', 'delete_item', 'schedule_item', 'set_status', 'save_draft', 'update_production', 'revise_production'])
       const globalOps = new Set(['add_item', 'add_skill', 'update_skill', 'delete_skill', 'add_style', 'update_style', 'delete_style', 'set_style', 'add_metric', 'add_person', 'update_person', 'delete_person', 'add_angle', 'update_angle', 'delete_angle'])
-      const structured = state.nativeRequests?.find(row => row.associationId === association.id && active(row) && row.turn === current.turn)
-      for (const operation of operations) {
-        if (workOps.has(operation.op)) {
-          if (association.workId !== null && operation.id !== association.workId) throw failure('native/foreign-object', 'This Session owns another work', 403)
-          const item = state.items.find(row => row.id === operation.id)
-          if (!item) throw failure('native/work-missing', 'Work not found', 404)
-          if (item.content && !expectedContent[item.id]) throw failure('native/version-required', 'Read and provide the current work content version', 400)
-          if (structured && structured.workId === item.id) throw failure('native/stage-edit-conflict', 'Submit this structured stage through media_desk_submit_result')
-        } else if (!globalOps.has(operation.op) || association.workId !== null) throw failure('native/operation-denied', 'Operation requires the global assistant', 403)
-        if (['add_skill', 'update_skill'].includes(operation.op) && (operation.status !== undefined && operation.status !== 'proposed'
-          || operation.op === 'update_skill' && state.skills.find(row => row.id === operation.id)?.status !== 'proposed')) throw failure('native/rule-review-required', 'Writing rules require user review and activation', 403)
-        const kind = /^(update|delete)_(style|skill)$/.exec(operation.op)?.[2]
-        const preference = kind && (kind === 'style' ? state.styles : state.skills).find(row => row.id === operation.id)
-        if (preference?.content) {
-          const version = expectedPreferences[(kind === 'style' ? 'style:' : 'rule:') + operation.id]
-          if (preference.content.status !== 'ready' || preference.content.sha256 !== version?.sha256 || preference.content.revision !== version?.revision) throw failure('native/preference-conflict', 'Read and provide the current writing preference version')
-        }
-      }
       const identity = resultId ?? exec.callId
       if (typeof identity !== 'string' || !identity || identity.length > 100) throw failure('native/result-id', 'Invalid result identity', 400)
-      return this.store.mutate('原生编辑', draft => {
-        const result = applyOps(draft, operations)
+      const resultKey = `native:${association.id}:${identity}`
+      const revisions = operations.filter(row => row.op === 'revise_production')
+      const preferences = operations.flatMap(operation => {
+        const kind = /^(update|delete)_(style|skill)$/.exec(operation.op)?.[2]
+        const row = kind && (kind === 'style' ? observed.styles : observed.skills).find(row => row.id === operation.id)
+        return row?.content ? [{ kind: kind === 'style' ? 'style' : 'rule', id: row.id, version: expectedPreferences[(kind === 'style' ? 'style:' : 'rule:') + row.id], reference: row.content }] : []
+      })
+      const result = await this.store.mutate('原生编辑', draft => {
+        const state = draft
+        this.store.notes.assertExpected(state, current.selectionVersions ?? {})
+        const structured = state.nativeRequests?.find(row => row.associationId === association.id && active(row) && row.turn === current.turn)
+        for (const operation of operations) {
+          if (workOps.has(operation.op)) {
+            if (association.workId !== null && operation.id !== association.workId) throw failure('native/foreign-object', 'This Session owns another work', 403)
+            const item = state.items.find(row => row.id === operation.id)
+            if (!item) throw failure('native/work-missing', 'Work not found', 404)
+            if (item.content && !expectedContent[item.id]) throw failure('native/version-required', 'Read and provide the current work content version', 400)
+            if (structured && structured.workId === item.id) throw failure('native/stage-edit-conflict', 'Submit this structured stage through media_desk_submit_result')
+            if (operation.op === 'revise_production') {
+              if (!item.production || (item.production.attemptId ?? null) !== (operation.attemptId ?? null)) throw failure('native/production-conflict', 'Read and provide the current production attempt')
+              if (!operation.revision || typeof operation.revision !== 'object' || Array.isArray(operation.revision)) throw failure('native/revision-invalid', 'Provide a production revision object', 400)
+            }
+          } else if (!globalOps.has(operation.op) || association.workId !== null) throw failure('native/operation-denied', 'Operation requires the global assistant', 403)
+          if (['add_skill', 'update_skill'].includes(operation.op) && (operation.status !== undefined && operation.status !== 'proposed'
+            || operation.op === 'update_skill' && state.skills.find(row => row.id === operation.id)?.status !== 'proposed')) throw failure('native/rule-review-required', 'Writing rules require user review and activation', 403)
+          const kind = /^(update|delete)_(style|skill)$/.exec(operation.op)?.[2]
+          const preference = kind && (kind === 'style' ? state.styles : state.skills).find(row => row.id === operation.id)
+          if (preference?.content) {
+            const version = expectedPreferences[(kind === 'style' ? 'style:' : 'rule:') + operation.id]
+            if (preference.content.status !== 'ready' || preference.content.sha256 !== version?.sha256 || preference.content.revision !== version?.revision) throw failure('native/preference-conflict', 'Read and provide the current writing preference version')
+            const pinned = preferences.find(row => row.id === operation.id && row.kind === (kind === 'style' ? 'style' : 'rule'))
+            pinned.reference = structuredClone(preference.content)
+          }
+        }
+        let result
+        if (!revisions.length) result = applyOps(draft, operations)
+        else {
+          result = { receipts: [], errors: [] }
+          for (const operation of operations) {
+            if (operation.op !== 'revise_production') {
+              const applied = applyOps(draft, [operation])
+              result.receipts.push(...applied.receipts); result.errors.push(...applied.errors)
+              continue
+            }
+            const item = draft.items.find(row => row.id === operation.id)
+            const production = item.production
+            const revision = operation.revision
+            const article = typeof revision.article === 'string' && revision.article.trim()
+            const text = article || Array.isArray(revision.edits)
+            const updated = { ...production, ...(text && item.content ? { article: item.body } : {}) }
+            const previousText = updated.article
+            const previousPrompts = [production.cover, ...production.images ?? [], ...production.shots ?? []].filter(Boolean).map(asset => [asset, asset.prompt])
+            const applied = applyRevision(updated, revision, { canDraw: false })
+            if (applied.errors.length) throw failure('native/revision-invalid', applied.errors.join('; '), 400)
+            if (!applied.receipts.length) throw failure('native/revision-invalid', 'No supported production changes were provided', 400)
+            for (const [asset, prompt] of previousPrompts) {
+              if (asset.prompt === prompt) continue
+              asset.renderId = randomUUID()
+              if (asset.media) asset.status = 'done'
+              else if (['running', 'pending'].includes(asset.status)) asset.status = 'idle'
+              asset.error = null
+              delete asset.pendingId
+            }
+            const selectsText = article || updated.article !== previousText
+            if (!selectsText) updated.article = production.article
+            if (updated.title !== production.title) item.title = updated.title
+            Object.assign(production, updated)
+            if (selectsText) {
+              production.current = true
+              for (const row of Object.values(item.drafts ?? {})) row.current = false
+            }
+            result.receipts.push({ text: tr('修改《{title}》', { title: production.title }), target: item.id, kind: 'item', redrawTargets: applied.targets })
+          }
+        }
         if (result.errors.length) throw failure('native/operation-invalid', result.errors.join('; '), 400)
         return result
-      }, { expectedContent, resultKey: `native:${association.id}:${identity}`, payloadHash: hash({ operations, expectedContent, expectedPreferences }),
-        validateAcceptance: () => { exec.signal.throwIfAborted(); this.sessions.requireAssociation(exec.agent); if (this.failedInputs.has(exec.agent.id)) throw failure('native/input-unsaved', 'Native input could not be recorded') } })
+      }, { expectedContent, resultKey, payloadHash: hash({ operations, expectedContent, expectedPreferences }),
+        validateAcceptance: () => {
+          exec.signal.throwIfAborted()
+          this.sessions.requireAssociation(exec.agent)
+          if (this.failedInputs.has(exec.agent.id) || this.failedWaits.has(exec.agent.id)) throw failure('native/input-unsaved', 'Native input could not be recorded')
+          for (const operation of revisions) if ((this.store.state.items.find(row => row.id === operation.id)?.production?.attemptId ?? null) !== (operation.attemptId ?? null)) {
+            throw failure('native/production-conflict', 'Production attempt changed before acceptance')
+          }
+          this.store.notes.assertExpected(observed, current.selectionVersions ?? {})
+          const record = this.store.writes.records.find(row => row.resultKey === resultKey)
+          for (const { kind, id, version, reference } of preferences) {
+            const current = (kind === 'style' ? this.store.state.styles : this.store.state.skills).find(row => row.id === id)?.content
+            const displaced = record?.files.find(row => row.kind === kind && row.subjectId === id)?.displaced
+            if (current?.revision !== version?.revision || current.sha256 !== version?.sha256
+              || createHash('sha256').update(this.store.notes.readBytesSync(displaced ?? reference)).digest('hex') !== version.sha256) {
+              throw failure('native/preference-conflict', 'Writing preference changed before acceptance')
+            }
+          }
+        } })
+      delete result.state
+      return result
     })
   }
 
   /** Durably claim a stage before Session resolution or model preparation; duplicate production reuses its attempt. */
   async request(kind, workId, instructions, { producer, data = {} } = {}) {
+    const assertPlan = state => {
+      if (kind !== 'article') return
+      const production = state.items.find(row => row.id === workId)?.production
+      const plan = state.nativeRequests?.find(row => row.id === data.planId && row.kind === 'plan' && row.workId === workId)
+      if (production?.attemptId !== data.planId || production.status !== 'running' || plan?.status !== 'accepted'
+        || !state.receipts?.some(row => row.resultKey === 'stage:' + data.planId)) {
+        throw failure('native/plan-stale', 'The script belongs to another production plan')
+      }
+    }
     const claimed = await this.store.run(async () => {
-      const state = await this.store.read()
-      const existing = producer && state.nativeRequests?.find(row => row.workId === workId && row.producer && active(row))
+      let state = await this.store.read()
+      let work = workId === null ? null : state.items.find(row => row.id === workId)
+      if (producer && work?.imported && !work.content) {
+        const draft = structuredClone(state)
+        const associations = (await this.sessions.list()).filter(row => row.status === 'bound' && row.active !== false)
+        const plan = this.store.notes.migrationPlan(draft, associations, draft, [workId])
+        await this.store.notes.preflightMigration(plan)
+        const files = await this.store.notes.prepareMigration(draft, plan)
+        files.push(...await this.store.notes.prepareManaged(state, draft))
+        await this.store.commitFiles(state, draft, files, { label: tr('登记作品文件'), result: { workId } })
+        state = await this.store.read()
+        work = state.items.find(row => row.id === workId)
+      }
+      assertPlan(state)
+      const attemptId = work?.production?.attemptId
+      const existing = producer && state.nativeRequests?.find(row => row.workId === workId && row.producer
+        && (active(row) || row.status === 'accepted' && row.id === attemptId && (state.nativeRequests.some(stage => stage.data.planId === attemptId && active(stage))
+          || work.production.status === 'running' || [work.production.cover, ...work.production.images ?? [], ...work.production.shots ?? []].some(asset => asset && ['pending', 'running'].includes(asset.status)))))
       if (existing) return { request: existing, reused: true }
-      const work = workId === null ? null : state.items.find(row => row.id === workId)
       if (workId !== null && !work) throw failure('native/work-missing', 'Work not found', 404)
       if (work?.content?.status && work.content.status !== 'ready') throw failure(work.content.code, work.content.error)
       const request = { id: randomUUID(), requestId: randomUUID(), kind, workId, producer: Boolean(producer), status: 'pending',
@@ -306,13 +461,16 @@ export class NativeWork {
       const association = await this.sessions.open(workId)
       const resolved = await this.service('sessionController').resolveAgent(association.sessionId)
       if (resolved.error) throw resolved.error
-      await this.store.mutate('关联原生任务', draft => {
-        const row = draft.nativeRequests.find(row => row.id === claimed.request.id)
-        if (!active(row)) throw failure('native/stage-stale', 'The admitted stage was canceled before dispatch')
-        Object.assign(row, { associationId: association.id, sessionId: association.sessionId, requestedModel: { ...resolved.agent.model.current() } })
-      }, { undoable: false })
-      await this.service('sessionController').prompt({ sessionId: association.sessionId, requestId: claimed.request.requestId, mode: 'queue',
-        content: [{ type: 'text', text: stageText(claimed.request) }] }, this.store.owner.signal)
+      await this.store.run(async () => {
+        await this.store.mutate('关联原生任务', draft => {
+          const row = draft.nativeRequests.find(row => row.id === claimed.request.id)
+          if (!active(row)) throw failure('native/stage-stale', 'The admitted stage was canceled before dispatch')
+          assertPlan(draft)
+          Object.assign(row, { associationId: association.id, sessionId: association.sessionId, requestedModel: { ...resolved.agent.model.current() } })
+        }, { undoable: false })
+        await this.service('sessionController').prompt({ sessionId: association.sessionId, requestId: claimed.request.requestId, mode: 'queue',
+          content: [{ type: 'text', text: stageText(claimed.request) }] }, this.store.owner.signal)
+      })
       return { ...claimed.request, associationId: association.id, sessionId: association.sessionId }
     } catch (error) {
       await this.store.mutate('原生任务受理失败', draft => {
@@ -386,13 +544,21 @@ export class NativeWork {
       }
       const validate = () => {
         const current = this.store.activeDraft?.nativeRequests?.find(row => row.id === stage.id) ?? this.store.state.nativeRequests?.find(row => row.id === stage.id)
-        if (!current || !active(current) || current.candidateHash !== stage.candidateHash || this.failedInputs.has(sessionId)) throw failure('native/stage-stale', 'Native stage is no longer current')
+        if (!current || !active(current) || current.candidateHash !== stage.candidateHash || this.failedInputs.has(sessionId) || this.failedWaits.has(sessionId)) throw failure('native/stage-stale', 'Native stage is no longer current')
         const association = this.sessions.requireAssociation(resolved.agent)
         if (association.id !== stage.associationId) throw failure('native/stage-stale', 'The work uses another conversation')
+        if (stage.kind === 'article' && (this.store.activeDraft ?? this.store.state).items.find(row => row.id === stage.workId)?.production?.attemptId !== stage.data.planId) {
+          throw failure('native/plan-stale', 'The script belongs to another production plan')
+        }
       }
       try {
         const candidate = stage.candidate ?? JSON.parse(await readFile(join(this.store.root, 'native-candidates', stage.id + '.json'), 'utf8'))
         if (hash(candidate) !== stage.candidateHash) throw failure('native/candidate-invalid', 'Retained native candidate changed')
+        if (stage.status === 'save-failed') await this.store.mutate('重试原生成果保存', draft => {
+          validate()
+          const row = draft.nativeRequests.find(row => row.id === stage.id)
+          row.status = 'candidate'; delete row.pendingId; delete row.error
+        }, { undoable: false })
         const result = await this.store.mutate('接受原生成果', draft => {
           validate()
           const row = draft.nativeRequests.find(row => row.id === stage.id)
@@ -400,17 +566,14 @@ export class NativeWork {
           row.status = 'accepted'; row.endSeq = end.seq; delete row.candidate; delete row.pendingId; delete row.error
           return { stageId: stage.id, workId: stage.workId }
         }, { undoable: stage.kind !== 'style', expectedContent: stage.expectedContent, resultKey: `stage:${stage.id}`, payloadHash: stage.candidateHash,
-          validateAcceptance: () => {
-            const current = this.store.state.nativeRequests.find(row => row.id === stage.id)
-            if (!current || !active(current) || current.candidateHash !== stage.candidateHash) throw failure('native/stage-stale', 'Native stage changed before publication')
-            if (this.sessions.requireAssociation(resolved.agent).id !== stage.associationId) throw failure('native/stage-stale', 'The work uses another conversation')
-          } })
+          validateAcceptance: validate })
         await this.store.mutate('保存原生回执', draft => { draft.nativeRequests.find(row => row.id === stage.id).acceptance = result.acceptance }, { undoable: false })
         if (schedule) await this.ctx.mediaDesk.producer?.nativeAccepted(stage, result.acceptance)
+        else if (stage.kind === 'article') await this.ctx.mediaDesk.producer?.complete(stage.workId, { recover: true, attemptId: stage.data.planId })
       } catch (error) {
         await this.store.mutate('原生成果保存失败', draft => {
           const row = draft.nativeRequests.find(row => row.id === stage.id)
-          if (row.status !== 'accepted') { row.status = 'save-failed'; row.error = error.message; row.pendingId = error.pendingId }
+          if (active(row)) { row.status = 'save-failed'; row.error = error.message; row.pendingId = error.pendingId }
         }, { undoable: false })
         await this.ctx.mediaDesk.producer?.nativeEnded(stage)
       }
@@ -447,7 +610,9 @@ export class NativeWork {
     const state = await this.store.read()
     const stages = state.nativeRequests?.filter(row => row.workId === workId && (active(row) || row.status === 'cancelled')) ?? []
     await this.store.mutate('取消原生任务', draft => {
-      for (const row of draft.nativeRequests ?? []) if (row.workId === workId && active(row)) row.status = 'cancelled'
+      for (const row of draft.nativeRequests ?? []) if (row.workId === workId && active(row)) { row.status = 'cancelled'; row.pendingInput = [] }
+      const production = draft.items.find(row => row.id === workId)?.production
+      if (production?.pendingInput?.length) production.pendingInput = []
     }, { undoable: false })
     const sessionIds = stages.map(row => row.sessionId).filter(Boolean)
     if (all) sessionIds.push(...this.sessions.associations.filter(row => row.workId === workId && row.active !== false).map(row => row.sessionId))

@@ -147,7 +147,6 @@ function Desk({ openSession, retainSession, SessionProvider, renderSlot, initial
     return () => window.removeEventListener('keydown', onKey)
   }, [canUndo])
 
-  const renderConversation = reference => <SessionProvider session={reference}>{renderSlot('media-desk.conversation', {})}</SessionProvider>
   // 工作区有自己的对话栏
   const focused = useDesk(s => Boolean(s.focusId))
   const showDock = dockOpen && !focused
@@ -176,9 +175,9 @@ function Desk({ openSession, retainSession, SessionProvider, renderSlot, initial
             <div className="md-page"><p className="md-muted">{t('工作台加载失败：{error}', { error })}</p><button type="button" className="md-btn" onClick={loadDesk}>{t('重试')}</button></div>
           ) : ready ? <Active /> : <div className="md-loading"><span className="md-shimmer">{t('正在铺开灵感…')}</span></div>}
         </main>
-        {ready ? <Studio openSession={openSession} retainSession={retainSession} renderConversation={renderConversation} initializeDraft={initializeDraft} /> : null}
+        {ready ? <Studio openSession={openSession} retainSession={retainSession} SessionProvider={SessionProvider} renderSlot={renderSlot} initializeDraft={initializeDraft} /> : null}
       </div>
-      {ready && showDock ? <ChatDock retainSession={retainSession} renderConversation={renderConversation} initializeDraft={initializeDraft} /> : null}
+      {ready && showDock ? <ChatDock retainSession={retainSession} SessionProvider={SessionProvider} renderSlot={renderSlot} initializeDraft={initializeDraft} /> : null}
       {ready ? <CaptureDialog /> : null}
       <FormDialog />
       {ready ? <NotesRecoveryDialog /> : null}

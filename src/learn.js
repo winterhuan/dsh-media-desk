@@ -1,6 +1,7 @@
 // 自我强化：从真实数据和你对草稿的修改里提炼规则，确认后才生效，并可导出成 DeepSeek Harness Skill。
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { activeStyle, styleToVoice } from './style.js'
 import { platformName, tr } from './i18n.js'
 
@@ -84,21 +85,30 @@ function slug(text, fallback) {
 
 /**
  * 把生效中的规则写成一个 DeepSeek Harness 用户级 Skill（<home>/skills/<name>/SKILL.md）。
- * 内容由用户在界面确认后点击导出才写入。
+ * 用户点击导出后，当前已接受的风格与规则保持同步；缺少导出时不创建。
  * @param {object} state - 当前状态。
  * @param {string} home - DSH_HOME。
- * @returns {Promise<{name: string, path: string, rules: number}>} 写入结果。
+ * @param {object} [options] - existingOnly 仅同步已有导出，不创建缺少的文件。
+ * @returns {Promise<{name: string, path: string, rules: number, slug: string}|undefined>} 写入结果；仅同步时缺少导出或已撤销导出返回 undefined。
  */
-export async function exportSkill(state, home) {
+export async function exportSkill(state, home, { existingOnly = false } = {}) {
   // 示例规则不是作者的风格，不能写进真实 Skill
-  const rules = state.skills.filter(skill => !skill.sample && (skill.status === 'active' || skill.status === 'exported'))
+  // Pending/conflict projections retain the verified accepted Notes preimage.
+  const rules = state.skills.filter(skill => !skill.sample && (skill.status === 'active' || skill.status === 'exported')
+    && (!skill.content || ['ready', 'pending', 'conflict'].includes(skill.content.status)))
   const picked = activeStyle(state)
-  const style = picked && !picked.preset ? picked : null
+  const style = picked && !picked.preset && (!picked.content || ['ready', 'pending', 'conflict'].includes(picked.content.status)) ? picked : null
   const name = 'media-desk-voice'
   const dir = join(home, 'skills', name)
+  const path = join(dir, 'SKILL.md')
+  let previous
+  if (existingOnly) {
+    try { previous = await readFile(path, 'utf8') } catch (error) { if (error.code === 'ENOENT') return; throw error }
+  }
   if (!rules.length && !style) {
     // 之前导出过的旧 Skill 不再代表现在的设置，撤掉它
     await rm(dir, { recursive: true, force: true })
+    if (existingOnly) return
     throw Object.assign(new Error(tr('还没有你自己的风格或规则。示例规则和模板不会被导出')), { status: 400 })
   }
   await mkdir(dir, { recursive: true })
@@ -106,6 +116,6 @@ export async function exportSkill(state, home) {
   const styleBlock = style ? `## ${tr('风格：{name}', { name: style.name })}\n\n${styleToVoice(style)}\n\n` : ''
   const ruleBlock = rules.length ? `## ${tr('必须遵守的规则')}\n\n${rules.map(r => `- **${r.name}**${tr('：')}${r.rule}${r.evidence ? tr('（依据：{evidence}）', { evidence: r.evidence }) : ''}`).join('\n')}\n` : ''
   const body = `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${tr('自媒体写作风格')}\n\n${tr('由「自媒体工作台」沉淀，更新于 {date}。', { date: new Date().toISOString().slice(0, 10) })}\n\n${styleBlock}${ruleBlock}`
-  await writeFile(join(dir, 'SKILL.md'), body)
-  return { name, path: join(dir, 'SKILL.md'), rules: rules.length, slug: slug(name, 'media-desk') }
+  if (body !== previous) await writeFileAtomic(path, body, { mode: 0o600 })
+  return { name, path, rules: rules.length, slug: slug(name, 'media-desk') }
 }

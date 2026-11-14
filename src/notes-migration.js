@@ -116,6 +116,7 @@ export class NotesMigration {
     for (const [index, notesRoot] of roots.entries()) {
       try { const reference = { notesRoot, relativePath: 'index.md' }; await retain(join(notesRoot, 'index.md'), `notes/${index}/index.md`, await this.store.notes.readBytes(reference), 'index') }
       catch (error) { if (error.code !== 'notes/missing') throw error }
+      registered.delete(join(notesRoot, 'index.md'))
     }
     for (const [source, reference] of registered) {
       try { await retain(source, `notes/${roots.indexOf(reference.notesRoot)}/${reference.relativePath}`, await this.store.notes.readBytes(reference, { binary: reference.relativePath.startsWith('assets/') }), reference.relativePath.startsWith('assets/') ? 'media' : 'notes') }
@@ -212,6 +213,7 @@ export class NotesMigration {
     const state = dataEntries.find(entry => entry.saved === 'state.json')
     await restore(state, this.store.file, 'state.json')
     const original = JSON.parse(await readFile(this.store.file, 'utf8'))
+    await this.store.writes.load()
     await this.store.notes.syncIndex(await this.store.notes.hydrate(original))
     const result = { id, retainedId: retained.id, retainedPath: retained.path, livePath: live, liveNotes: pending.liveNotes ?? [], nativeSessionIds: pending.nativeSessionIds,
       packageVersion: backup.packageVersion, restoredSourceHash: backup.sourceHash, verified: hash(await readFile(this.store.file)) === backup.sourceHash, completedAt: new Date().toISOString() }

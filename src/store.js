@@ -156,6 +156,7 @@ export class Store {
     const next = structuredClone(this.state)
     const projected = await this.notes.hydrate(next)
     await this.notes.syncIndex(projected)
+    await this.syncDerivedSkill?.(projected)
     if (!same(next, this.state)) {
       await this.persist(next)
       this.state = next
@@ -324,6 +325,7 @@ export class Store {
       await this.writes.publish(record)
       const receipt = await this.acceptSaved(record, validateAcceptance)
       await this.notes.syncIndex(draft)
+      await this.syncDerivedSkill?.(draft)
       return receipt
     } catch (error) {
       try { await this.writes.restoreAccepted(record, error) } catch (restoreError) { error.cause = restoreError }

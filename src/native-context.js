@@ -21,14 +21,14 @@ export function apply(ctx) {
     execute: async (args, exec) => JSON.parse(JSON.stringify(await execute(args, exec))),
     presentCall: () => ({ card: 'generic', title: name.replaceAll('_', ' '), kind: 'other' }),
   }))
-  register('media_desk_read', 'Read the current registered work, writing preferences, materials or metrics and the owned structured stage. Long work text returns a continuation offset; large collections return paged JSON text with a continuation offset.', {
-    kind: { type: 'string', enum: ['work', 'preferences', 'materials', 'metrics'] },
+  register('media_desk_read', 'Read the current registered work, writing preferences, materials or metrics and the owned structured stage. Responses within the limit return content directly; larger responses return paged JSON text with a continuation offset.', {
+    kind: { type: 'string', enum: ['work', 'preferences', 'materials', 'metrics'], description: 'preferences returns the global style/rule catalog with current versions and status, excluding author samples. Work Sessions read selected or stage-frozen writing preferences.' },
     id: { type: 'string', description: 'Work identity. A work Session can read its own work only; the global assistant can select a listed work.' },
-    offset: { type: 'integer', description: 'Text offset, defaults to 0.' },
-    limit: { type: 'integer', description: 'Text characters to return, 1–20000, defaults to 12000.' },
+    offset: { type: 'integer', description: 'Character offset in the complete JSON text, defaults to 0.' },
+    limit: { type: 'integer', description: 'JSON text characters to return, 1–20000, defaults to 12000.' },
   }, (args, exec) => work.read(exec, args))
   register('media_desk_edit', 'Apply ordinary edits to registered objects and return durable save receipts. Use media_desk_submit_result for an active structured stage. Writing rules are proposals for user review.', {
-    operations: { type: 'string', required: true, description: 'JSON array of 1–24 operations: update_item, save_draft, update_production, schedule_item, set_status, delete_item; global assistant also supports add_item, add/update/delete_skill, add/update/delete_style, set_style, add_metric, add/update/delete_person, add/update/delete_angle. Fields match the object returned by media_desk_read. Maximum 200000 characters.' },
+    operations: { type: 'string', required: true, description: 'JSON array of 1–24 operations, maximum 200000 characters: update_item, save_draft, update_production, revise_production, schedule_item, set_status, delete_item; global assistant also supports add_item, add/update/delete_skill, add/update/delete_style, set_style, add_metric, add/update/delete_person, add/update/delete_angle. revise_production: id, attemptId from production, revision {title, coverText, article, edits[{find,replace}], cover{prompt}, images[{no,caption,prompt}], shots[{no,shot,visual,voice,seconds,prompt}]}. Numbers are 1-based; seconds 1–60; up to 20 text edits, 8 images, 24 shots. Title/coverText/caption/shot/visual/voice/prompt limits are 80/24/40/12/200/200/1200 characters. Revisions save descriptions and return redrawTargets; use media_desk_produce redraw explicitly. Other fields match media_desk_read.' },
     expectedContent: { type: 'string', description: 'JSON object mapping work identities to their current content versions from media_desk_read. Required for edits to a registered work.' },
     expectedPreferences: { type: 'string', description: 'JSON object mapping style:<id> or rule:<id> to its content version from media_desk_read preferences. Required for updating or deleting registered preferences.' },
     resultId: { type: 'string', description: 'Optional stable operation identity, at most 100 characters. Reuse it with identical arguments to recover the existing receipt.' },

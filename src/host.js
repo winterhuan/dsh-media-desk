@@ -306,8 +306,11 @@ async function route(ctx, store, desk, req, res) {
       return json(res, 200, { state: await store.read() })
     case 'native/retry':
       return json(res, 200, { ...await desk.nativeWork.retry(body.id), state: await store.read() })
-    case 'media/retry':
-      return json(res, 200, { ...await desk.mediaFiles.retry(body.id), state: await store.read() })
+    case 'media/retry': {
+      const accepted = await desk.mediaFiles.retry(body.id)
+      await desk.producer.complete(accepted.workId, { recover: true, attemptId: accepted.attemptId, language: accepted.language })
+      return json(res, 200, { ...accepted, state: await store.read() })
+    }
     case 'produce/save': {
       const settings = await desk.settings.read()
       const state = await store.read()
@@ -428,16 +431,19 @@ export default class MediaDeskHost extends Service {
     })
     const nativeSessions = new NativeSessions(ctx, store, settings, config)
     store.notes = new Notes(ownership)
+    store.syncDerivedSkill = state => exportSkill(state, dirname(store.root), { existingOnly: true })
     const nativeWork = new NativeWork(ctx, store, nativeSessions)
     producer.native = nativeWork
-    const mediaFiles = new MediaFiles(store)
+    const mediaFiles = new MediaFiles(store, { onError: error => ctx.logger.error(error) })
     producer.media = mediaFiles
     Object.assign(this, { store, settings, producer, nativeSessions, nativeWork, mediaFiles })
     const desk = this
     await nativeSessions.init()
     await store.notes.init()
     await store.read()
-    await mediaFiles.recover()
+    for (const accepted of await mediaFiles.recover()) {
+      await producer.complete(accepted.workId, { recover: true, attemptId: accepted.attemptId, language: accepted.language })
+    }
     await producer.settleAll()
     await nativeWork.init()
     // 启动时恢复用户在工作台里选过的助手模型
@@ -486,15 +492,20 @@ export default class MediaDeskHost extends Service {
     const nativeClose = this.store && this.ownership.track(async () => {
       await this.nativeWork?.close()
       await this.store.mutate('停止创作任务', draft => {
-        for (const stage of draft.nativeRequests ?? []) if (['pending', 'running', 'waiting', 'candidate', 'save-failed'].includes(stage.status)) stage.status = 'interrupted'
-        for (const work of draft.items) if (work.production?.status === 'running') work.production.status = 'cancelled'
+        for (const stage of draft.nativeRequests ?? []) if (['pending', 'running', 'waiting', 'candidate', 'save-failed'].includes(stage.status)) {
+          if (stage.status !== 'save-failed') stage.status = 'interrupted'
+          stage.pendingInput = []
+        }
+        for (const work of draft.items) if (work.production?.status === 'running') { work.production.status = 'cancelled'; work.production.pendingInput = [] }
       }, { undoable: false })
     })
     this.ownership.beginShutdown()
     this.closingPromise = (async () => {
-      await Promise.all([nativeClose, this.producer?.close()])
-      await this.ownership.drain()
-      await this.ownership.release()
+      const results = await Promise.allSettled([nativeClose, this.producer?.close()])
+      try { await this.ownership.drain() } catch (error) { results.push({ status: 'rejected', reason: error }) }
+      try { await this.ownership.release() } catch (error) { results.push({ status: 'rejected', reason: error }) }
+      const errors = results.filter(result => result.status === 'rejected').map(result => result.reason)
+      if (errors.length) throw new AggregateError(errors, 'Media Desk shutdown failed')
     })()
     return this.closingPromise
   }
