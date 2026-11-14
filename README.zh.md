@@ -27,7 +27,7 @@ kind: "package-bundle"
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.3
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.4
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
@@ -103,7 +103,7 @@ pnpm test
 
 [组合补丁](cordis.patch.yml)激活包的 Host 和专用创作 preset。[Host](src/host.js)鉴权 `/media-desk` 请求，通过[目录所有权](src/write-owner.js)串行执行编辑。[Notes](src/notes.js)在 [Store](src/store.js) 读取时投影已登记作品、材料和偏好；持久化行只保留引用与运行状态，不保存可编辑文字。[原生关联](src/native-sessions.js)保存控制器实际身份、Wiki／Notes 根目录、DSH home、preset 和初始模型。DSH 的 SessionController 管理运行中的 Agent；页面导航只改变客户端订阅。[浏览器入口](client/index.jsx)注册侧栏面板并打开已保存 Session。[Producer](src/produce.js)保留结构化策划案和固定偏好版本，通过已登记正文接受文字。
 
-[保存记录](src/notes-writes.js)在发布前保留独立候选、已接受原版本及移出的编辑器文件。一次 Store 替换接受引用、回执及关联结构化数据，随后发送通知。[逆向编辑](src/notes-undo.js)使用固定的前后版本；[迁移](src/notes-migration.js)验证备份，并在 Wiki 外保留回滚证据。
+[保存记录](src/notes-writes.js)在发布前保留独立候选、已接受原版本及移出的编辑器文件。每次保存使用一份原子更新的日志，兼容只有 proposal 的旧记录。一次 Store 替换接受引用、回执及关联结构化数据，随后发送通知。[逆向编辑](src/notes-undo.js)使用固定的前后版本，无引用的私有逆向文件随记录过期清理；[迁移](src/notes-migration.js)验证备份，并在 Wiki 外保留回滚证据。
 
 </details>
 

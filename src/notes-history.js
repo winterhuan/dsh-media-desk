@@ -50,19 +50,15 @@ export async function pruneNotesHistory(store) {
   if (JSON.stringify(next) !== JSON.stringify(store.state)) await store.persist(next)
 
   const accepted = new Set(store.state.receipts?.map(receipt => receipt.id))
-  const keep = references([next.items, next.styles, next.skills, next.voice, next.notesUndo,
-    next.nativeRequests?.filter(row => !['accepted', 'rejected', 'failed', 'cancelled', 'superseded'].includes(row.status))])
-  for (const entry of next.notesUndo ?? []) references(await readUndoChanges(entry, store.filesDir), keep)
   const retained = new Set()
   const counts = new Map()
   for (const record of [...store.writes.records].reverse().sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
     const done = accepted.has(record.id) || record.status === 'accepted'
-    if (!done || record.observedConflicts?.length) { retained.add(record); references(record, keep); continue }
+    if (!done || record.observedConflicts?.length) { retained.add(record); continue }
     const subjects = record.files.map(file => `${file.after.notesRoot}:${file.subjectId ?? file.workId}:${file.language ?? file.kind}`)
     if (subjects.some(subject => (counts.get(subject) ?? 0) < (record.files.every(file => file.kind === 'index') ? 1 : HISTORY_LIMIT))) {
       retained.add(record)
       for (const subject of subjects) counts.set(subject, (counts.get(subject) ?? 0) + 1)
-      for (const file of record.files) references([file.candidate, file.beforeSnapshot, file.displacements, file.displaced], keep)
     }
     references(record, expired)
   }
@@ -75,6 +71,7 @@ export async function pruneNotesHistory(store) {
     retired.push(directory)
   }
   store.writes.records = store.writes.records.filter(record => retained.has(record))
+  const keep = await requiredHistory(store)
   // An interrupted cleanup retains its manifest until the next pass can finish removing its files.
   let names = []
   try { names = await readdir(store.writes.root) } catch (error) { if (error.code !== 'ENOENT') throw error }
@@ -98,4 +95,12 @@ export async function pruneNotesHistory(store) {
     await unlink(path)
   }
   for (const directory of retired) await rm(directory, { recursive: true })
+
+  const undo = new Set([...(store.state.notesUndo ?? []), ...store.writes.records.map(record => record.undoEntry)]
+    .filter(Boolean).map(entry => entry.changes.relativePath))
+  let entries = []
+  try { entries = await readdir(join(store.filesDir, 'undo'), { withFileTypes: true }) } catch (error) { if (error.code !== 'ENOENT') throw error }
+  for (const entry of entries) if (entry.isFile() && /^[a-f0-9-]{36}\.json$/.test(entry.name) && !undo.has(`undo/${entry.name}`)) {
+    await unlink(join(store.filesDir, 'undo', entry.name))
+  }
 }

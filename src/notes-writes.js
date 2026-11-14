@@ -1,7 +1,7 @@
 /** Recoverable Notes publication preserves candidates and every displaced editor inode for managed content. */
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { copyFile, link, lstat, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { copyFile, link, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { stateChanges } from './state-changes.js'
@@ -33,13 +33,14 @@ export class NotesWrites {
     for (const id of names.sort()) {
       if (!/^[a-f0-9-]{36}$/.test(id)) continue
       let bytes
-      try { bytes = await readFile(join(this.root, id, 'proposal.json'), 'utf8') } catch (error) {
-        if (error.code === 'ENOENT' && !(await readdir(join(this.root, id))).length) continue
-        throw error
+      try { bytes = await readFile(join(this.root, id, 'pending.json'), 'utf8') } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+        try { bytes = await readFile(join(this.root, id, 'proposal.json'), 'utf8') } catch (error) {
+          if (error.code === 'ENOENT' && !(await readdir(join(this.root, id))).length) continue
+          throw error
+        }
       }
-      const proposal = JSON.parse(bytes)
-      let record = proposal
-      try { record = JSON.parse(await readFile(join(this.root, id, 'pending.json'), 'utf8')) } catch (error) { if (error.code !== 'ENOENT') throw error }
+      const record = JSON.parse(bytes)
       if (record.version !== 1 || record.id !== id || !Array.isArray(record.files) || !Array.isArray(record.changes)
         || record.receipt?.id !== id || typeof record.resultKey !== 'string' || !/^[a-f0-9]{64}$/.test(record.payloadHash)) {
         throw failure('notes/save-invalid', tr('Notes 保存记录无效，请修复保留的记录文件'))
@@ -51,6 +52,7 @@ export class NotesWrites {
 
   async save(record) {
     await writeFileAtomic(this.path(record, 'pending.json'), JSON.stringify(record), { mode: 0o600, dirMode: 0o700 })
+    await rm(this.path(record, 'proposal.json'), { force: true })
   }
 
   async bytes(reference) {
@@ -128,7 +130,7 @@ export class NotesWrites {
     if (undoable) record.undoEntry = await notesUndoEntry(record, this.store.filesDir, before)
     if (undoOf) { record.undoOf = undoOf; receipt.undoOf = undoOf }
     await mkdir(join(this.root, id), { recursive: true, mode: 0o700 })
-    await writeFile(this.path(record, 'proposal.json'), JSON.stringify(record), { flag: 'wx', mode: 0o600 })
+    await this.save(record)
     this.records.push(record)
     try {
       for (let index = 0; index < files.length; index++) {

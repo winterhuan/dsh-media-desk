@@ -27,7 +27,7 @@ Install the fixed Git release into a separate DSH `0.2.2-rc.1` Web profile and o
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.3
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.4
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
@@ -103,7 +103,7 @@ The [native runtime fixture](test/fixtures/native-runtime.js) installs an isolat
 
 [The bundle patch](cordis.patch.yml) activates the package Host and a dedicated creative preset. [The Host](src/host.js) authenticates `/media-desk` requests and serializes edits through [directory ownership](src/write-owner.js). [Notes](src/notes.js) projects registered works, materials and preferences into [Store](src/store.js) reads; durable rows retain references and operational state instead of editable text. [Native associations](src/native-sessions.js) persist actual controller identities, Wiki/Notes roots, DSH home, preset and initial model. DSH's SessionController owns live Agents; page navigation only changes Client subscriptions. [The browser entry](client/index.jsx) registers the sidebar panel and opens saved Sessions. [The producer](src/produce.js) preserves structured plans and fixed preference versions while using the registered body for accepted text.
 
-[Saved writes](src/notes-writes.js) retain independent candidates, accepted preimages and displaced editor files before publication. One Store replacement accepts references, receipts and associated structured data; notifications follow. [Inverse edits](src/notes-undo.js) use fixed before/after versions, while [migration](src/notes-migration.js) verifies backups and keeps rollback evidence outside the Wiki.
+[Saved writes](src/notes-writes.js) retain independent candidates, accepted preimages and displaced editor files before publication. Each save uses one atomically updated journal; older proposal-only records remain readable. One Store replacement accepts references, receipts and associated structured data; notifications follow. [Inverse edits](src/notes-undo.js) use fixed before/after versions; unreferenced private inverse files expire with their records, while [migration](src/notes-migration.js) verifies backups and keeps rollback evidence outside the Wiki.
 
 </details>
 

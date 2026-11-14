@@ -135,6 +135,7 @@ try {
   await store.refresh()
   await store.writes.load()
   await store.read()
+  for (const record of store.writes.records) await store.writes.save(record)
   await pruneNotesHistory(store)
   const current = await store.read()
   for (const reference of Object.values(current.mediaReferences ?? {})) {

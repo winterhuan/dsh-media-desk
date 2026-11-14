@@ -92,9 +92,12 @@ export class WriteOwner {
     for (const id of pending ?? []) {
       if (!/^[a-f0-9-]{36}$/.test(id)) continue
       let bytes
-      try { bytes = await readFile(join(this.dataRoot, 'notes-writes', id, 'proposal.json'), 'utf8') } catch (error) {
-        if (error.code === 'ENOENT' && !(await readdir(join(this.dataRoot, 'notes-writes', id))).length) continue
-        throw error
+      try { bytes = await readFile(join(this.dataRoot, 'notes-writes', id, 'pending.json'), 'utf8') } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+        try { bytes = await readFile(join(this.dataRoot, 'notes-writes', id, 'proposal.json'), 'utf8') } catch (error) {
+          if (error.code === 'ENOENT' && !(await readdir(join(this.dataRoot, 'notes-writes', id))).length) continue
+          throw error
+        }
       }
       const saved = JSON.parse(bytes)
       if (saved.version !== 1 || saved.id !== id || !Array.isArray(saved.files)) throw new Error('Saved Notes publication metadata is invalid')

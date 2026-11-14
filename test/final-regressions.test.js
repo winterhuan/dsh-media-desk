@@ -89,12 +89,10 @@ test('Notes 索引捕获发布时的外部编辑和保留句柄写入，拒绝�
     if (record.status !== 'conflict' || entry?.kind !== 'index' || !entry.displaced) continue
     if ((await readFile(join(entry.displaced.notesRoot, entry.displaced.relativePath), 'utf8')).includes('Editor paragraph 1')) continue
     const firstId = '00000000-0000-0000-0000-000000000000'
-    for (const name of ['proposal.json', 'pending.json']) {
-      const file = join(journals, id, name)
-      const metadata = JSON.parse(await readFile(file, 'utf8'))
-      metadata.id = firstId; metadata.receipt.id = firstId
-      await writeFile(file, JSON.stringify(metadata))
-    }
+    const file = join(journals, id, 'pending.json')
+    const metadata = JSON.parse(await readFile(file, 'utf8'))
+    metadata.id = firstId; metadata.receipt.id = firstId
+    await writeFile(file, JSON.stringify(metadata))
     await rename(join(journals, id), join(journals, firstId))
     reordered = true
     break

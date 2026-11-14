@@ -67,7 +67,7 @@ Recent history and undo each retain five entries. Current drafts, referenced ori
 
 For a version conflict, review the current body and retained external version, then keep the current body or adopt the repaired external version. Both versions and the candidate remain available. Refresh if the file changes again. Undo targets the original accepted edit’s language, preserves later disjoint edits and reports overlapping conflicts without lowering versions.
 
-To organize existing ID filenames and visible history, stop DSH and run the following from this package with the stopped home and Wiki paths. The command creates and verifies a private backup, moves files and updates their references. Keep this package version when restarting; older packages cannot read the renamed media safely.
+To organize existing ID filenames and visible history, stop DSH and run the following from this package with the stopped home and Wiki paths. The command creates and verifies a private backup, organizes files and references, consolidates save records and removes expired undo files. Keep this package version when restarting; older packages cannot read renamed media or single save journals safely.
 
 ```sh
 node scripts/organize-notes.mjs "$DSH_HOME" "$WIKI_PATH"

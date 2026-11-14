@@ -348,13 +348,14 @@ test('各实际保存边界进程终止后核对候选、主文件与回执，�
     const paused = await awaitingPause
     const saveId = await client.value(paused, boundary.name === 'receipt' ? `state.receipts.find(receipt => receipt.resultKey === ${JSON.stringify(resultKey)}).id` : 'record.id')
     const saveRoot = join(runtime.home, 'media-desk', 'notes-writes', saveId)
-    const proposal = JSON.parse(await readFile(join(saveRoot, 'proposal.json'), 'utf8'))
-    const file = proposal.files.find(row => row.workId === id)
+    const journal = JSON.parse(await readFile(join(saveRoot, 'pending.json'), 'utf8'))
+    const file = journal.files.find(row => row.workId === id)
     const candidatePath = join(file.candidate.notesRoot, file.candidate.relativePath)
     assert.match(await readFile(candidatePath, 'utf8'), /The retained interrupted candidate\./)
     assert.equal(settled, false, 'The actual Host caller must still await the interrupted save')
-    if (boundary.journal) assert.equal(JSON.parse(await readFile(join(saveRoot, 'pending.json'), 'utf8')).id, saveId)
-    else await assert.rejects(readFile(join(saveRoot, 'pending.json')), { code: 'ENOENT' })
+    assert.equal(journal.id, saveId)
+    if (!boundary.journal) assert.equal(journal.status, 'candidate')
+    await assert.rejects(readFile(join(saveRoot, 'proposal.json')), { code: 'ENOENT' })
     if (boundary.name === 'displaced') {
       await assert.rejects(readFile(primaryPath), { code: 'ENOENT' })
       assert.equal(await readFile(join(file.displaced.notesRoot, file.displaced.relativePath), 'utf8'), original)
