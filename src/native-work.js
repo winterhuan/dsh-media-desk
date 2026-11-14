@@ -240,11 +240,11 @@ export class NativeWork {
       return text.length <= limit && offset === 0 ? value : { text: text.slice(offset, offset + limit), truncated: text.length > offset + limit, nextOffset: text.length > offset + limit ? offset + limit : null }
     }
     if (kind === 'work') {
-      const workId = id ?? association.workId
+      const workId = id || association.workId
       if (association.workId !== null && workId !== association.workId) throw failure('native/foreign-object', 'This Session owns another work', 403)
       const work = state.items.find(row => row.id === workId)
       if (!work) {
-        if (workId !== null) throw failure('native/work-missing', 'Work not found. For a global review, call media_desk_read with kind work and omit id to list works, then use a returned work id. Stage and association ids do not identify works.', 404)
+        if (workId !== null) throw failure('native/work-missing', 'Work not found. For a global review, call media_desk_read with kind work and omit id or pass null or an empty string to list works, then use a returned work id. Stage and association ids do not identify works.', 404)
         return page({ works: state.items.map(row => ({ id: row.id, title: row.title, status: row.status, content: row.content })),
           stage: this.currentStage(state, association) })
       }
@@ -277,7 +277,7 @@ export class NativeWork {
       stage: this.currentStage(state, association) })
     }
     if (kind === 'materials') return page({ materials: state.items.filter(row => row.materialContent).map(row => ({ id: row.id, title: row.sourceMaterial?.title ?? row.title, source: row.sourceMaterial?.source ?? row.source, materialContent: row.materialContent })), stage: this.currentStage(state, association) })
-    if (kind === 'metrics' && association.workId === null) return page({ metrics: state.metrics, accounts: state.accounts })
+    if (kind === 'metrics' && association.workId === null) return page({ metrics: state.metrics.map(row => ({ ...row, itemId: row.itemId || null })), accounts: state.accounts })
     throw failure('native/read-kind', 'Unsupported reading scope', 400)
   }
 

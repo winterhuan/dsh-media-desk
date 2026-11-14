@@ -23,12 +23,14 @@ const waitState = async (runtime, predicate) => {
   throw new Error('Expected accepted Host state was not observed\n' + runtime.log)
 }
 
-test('全局复盘把任务编号误传为作品编号后可发现作品并读取正文与指标', { timeout: 180000 }, async t => {
-  const runtime = await nativeRuntime(t, { recipes: { MD_STAGE_rules: { calls: [read,
+test('全局复盘兼容空作品编号，纠正任务编号并读取正文与指标', { timeout: 180000 }, async t => {
+  const runtime = await nativeRuntime(t, { recipes: { MD_STAGE_rules: { calls: [
+    { name: 'media_desk_read', arguments: { id: '', kind: 'work', limit: 18000, offset: 0 } },
     { name: 'media_desk_read', arguments: { kind: 'work', id: '$stageId' } },
     read,
+    { name: 'media_desk_read', arguments: { kind: 'work', id: null } },
     { name: 'media_desk_read', arguments: { kind: 'work', id: 'seed_2' } },
-    { name: 'media_desk_read', arguments: { kind: 'metrics' } },
+    { name: 'media_desk_read', arguments: { kind: 'metrics', id: null } },
     { name: 'media_desk_submit_result', arguments: { stageId: '$stageId', result: JSON.stringify({ rules: [] }) } },
   ], reply: 'Reviewed the available work; no supported rule to propose.' } } })
   await runtime.start()
@@ -36,28 +38,38 @@ test('全局复盘把任务编号误传为作品编号后可发现作品并读�
   assert.equal((await runtime.host('ops', { ops: initial.items.filter(work => !['seed_1', 'seed_2'].includes(work.id))
     .map(work => ({ op: 'delete_item', id: work.id })) })).status, 200)
   assert.equal((await runtime.host('notes/migrate', {})).status, 200)
+  assert.equal((await runtime.host('ops', { ops: [
+    { op: 'add_metric', itemId: 'seed_2', platform: '公众号', views: 1, likes: 1, comments: 1, shares: 0, saves: 1 },
+    { op: 'add_metric', platform: '公众号', views: 1, likes: 1, comments: 1, shares: 0, saves: 1 },
+  ] })).status, 200)
   const requested = await runtime.host('skills/learn', {})
   assert.equal(requested.status, 200)
   const stage = requested.value.stage
   const turn = await runtime.turn(stage.sessionId, stage.requestId)
   const results = turn.events.filter(event => event.type === 'tool/result')
-  assert.equal(results.length, 6)
+  assert.equal(results.length, 7)
+  assert.equal(results[0].data.message.isError, false, results[0].data.message.content[0].text)
   assert.equal(results[1].data.message.isError, true)
   assert.match(results[1].data.message.content[0].text, /omit id.*list works/)
   assert.ok(results.filter((_, index) => index !== 1).every(event => !event.data.message.isError))
   const listing = JSON.parse(results[2].data.message.content[0].text)
   assert.equal(listing.stage.workId, null)
   assert.ok(listing.works.some(work => work.id === 'seed_2' && work.content))
-  const work = JSON.parse(results[3].data.message.content[0].text)
+  for (const index of [0, 3]) assert.deepEqual(JSON.parse(results[index].data.message.content[0].text).works, listing.works)
+  const work = JSON.parse(results[4].data.message.content[0].text)
   assert.equal(work.id, 'seed_2')
   assert.equal(typeof work.body, 'string')
   assert.ok(work.body.length > 0)
-  assert.ok(Array.isArray(JSON.parse(results[4].data.message.content[0].text).metrics))
+  const metrics = JSON.parse(results[5].data.message.content[0].text).metrics
+  assert.deepEqual(metrics.map(row => row.itemId), ['seed_2', null])
+  assert.ok(metrics.every(row => row.views === 1 && row.likes === 1 && row.comments === 1 && row.shares === 0 && row.saves === 1))
   await waitState(runtime, state => state.nativeRequests.some(row => row.id === stage.id && row.status === 'accepted'))
 })
 
 test('原生工具按实际 Agent 归属编辑，保留持久回执与唯一 Notes 正文', { timeout: 180000 }, async t => {
-  const runtime = await nativeRuntime(t, { recipes: { MD_FIXTURE_EDIT: { calls: [read,
+  const runtime = await nativeRuntime(t, { recipes: { MD_FIXTURE_EDIT: { calls: [
+    { name: 'media_desk_read', arguments: { kind: 'work', id: '' } },
+    { name: 'media_desk_read', arguments: { kind: 'work', id: null } },
     { name: 'media_desk_edit', arguments: { operations: JSON.stringify([{ op: 'update_item', id: 'seed_2', body: 'Accepted by the native business tool.' }]), expectedContent: '$versions', resultId: 'native-edit' } },
   ], reply: 'The tool returned a saved receipt.' } } })
   await runtime.start()
@@ -68,6 +80,7 @@ test('原生工具按实际 Agent 归属编辑，保留持久回执与唯一 Not
   assert.equal(finished.end.data.reason.kind, 'completed')
   const results = finished.events.filter(event => event.type === 'tool/result')
   assert.ok(results.every(event => event.data.message.isError === false), JSON.stringify(results))
+  for (const result of results.slice(0, 2)) assert.equal(JSON.parse(result.data.message.content[0].text).id, 'seed_2')
   const state = await waitState(runtime, state => state.items.find(row => row.id === 'seed_2').body === 'Accepted by the native business tool.')
   const work = state.items.find(row => row.id === 'seed_2')
   assert.match(await readFile(join(work.content.notesRoot, work.content.relativePath), 'utf8'), /Accepted by the native business tool/)
