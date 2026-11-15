@@ -50,7 +50,7 @@ export function apply(ctx) {
   })
   register('media_desk_submit_result', 'Submit a structured stage candidate. Matching duplicates return the existing candidate or receipt; acceptance requires the corresponding native turn to finish successfully and the Notes save to succeed.', {
     stageId: { type: 'string', required: true, description: 'Current owned stage identity from media_desk_read.' },
-    result: { type: 'string', required: true, description: 'JSON object, at most 200000 characters. plan: title, coverText, facts[], outline[], cover, characters, images[{caption,anchor,prompt}], shots[{shot,visual,voice,seconds,prompt}], sources[]; article: article and sources[]; style: name, summary, tone, sentences, opening, structure, words[], avoid[], samples[]; rules: rules[{name,rule,evidence}]. Each source has title, reference, date and limitations.' },
+    result: { type: 'string', required: true, description: 'JSON object, at most 200000 characters. plan: title, coverText, facts[], outline[], cover (nonempty image-prompt string), characters, images[{caption,anchor,prompt}], shots[{shot,visual,voice,seconds,prompt}], sources[]. facts: at most 8; outline: at most 6; images and shots: exactly stage.settings.imageCount and stage.settings.shotCount, even when imageReady is false; article: article and sources[]; style: name, summary, tone, sentences, opening, structure, words[], avoid[], samples[]; rules: rules[{name,rule,evidence}]. Each source has title, reference, date and limitations.' },
   }, (args, exec) => work.submit(exec, { stageId: args.stageId, result: parse(args.result, 200000) }))
   ctx.systemPrompt.context({
     name: 'media-desk:association', order: 60, required: true, interpolate: false,
@@ -61,12 +61,12 @@ export function apply(ctx) {
         const wikiCommand = process.platform === 'win32'
           ? '$env:WIKI_PATH = $env:DSH_MEDIA_DESK_WIKI_PATH' : 'WIKI_PATH="$DSH_MEDIA_DESK_WIKI_PATH"'
         return 'Media Desk association: ' + JSON.stringify({
-          id: association.id, workId: association.workId, wikiRoot: association.wikiRoot, notesRoot: association.notesRoot,
+          workId: association.workId, wikiRoot: association.wikiRoot, notesRoot: association.notesRoot,
         }) + '\nUse the effective llm-wiki skill to search relevant summaries, read selected full pages and check sources. '
           + 'Use absolute paths under the bound Wiki. For skill Shell commands set ' + wikiCommand + ' explicitly. '
           + 'Keep source dates and uncertainty. Knowledge summaries supply facts; only selected author samples supply personal writing style. '
           + 'Read-only requests forbid material and knowledge writes. Registered creative materials use Media Desk business operations.'
-          + '\nStart with media_desk_read. Use its stage instructions for production, style analysis and rule learning. '
+          + '\nStart with media_desk_read({kind: "work"}); omit id to read this Session’s work or the global work list. File read uses 1-based line offsets and limit <= 2000 lines; media_desk_read uses character offsets and limits. Use its stage instructions for production, style analysis and rule learning. '
           + 'Do not interpret streaming prose or a candidate acknowledgement as an accepted work. Report unresolved source evidence and tool failures plainly.'
       } catch (error) {
         return 'Media Desk association unavailable: ' + error.message + ' Business writes are unavailable.'

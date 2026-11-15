@@ -225,10 +225,14 @@ export class Producer {
 
   validatePlan(raw, settings) {
     const bad = message => { throw Object.assign(new Error(message), { code: 'native/plan-invalid', status: 400 }) }
-    for (const key of ['title', 'coverText', 'cover']) if (typeof raw[key] !== 'string' || !raw[key].trim()) bad('Plan requires ' + key)
-    for (const key of ['facts', 'outline', 'images', 'shots']) if (!Array.isArray(raw[key])) bad('Plan requires ' + key)
-    if (raw.facts.length > 8 || raw.outline.length > 6 || raw.images.length !== settings.imageCount || raw.shots.length !== settings.shotCount) bad('Plan counts must match the requested settings')
-    if (raw.images.some(row => typeof row.prompt !== 'string' || !row.prompt.trim()) || raw.shots.some(row => typeof row.prompt !== 'string' || !row.prompt.trim() || typeof row.voice !== 'string' || !Number.isFinite(row.seconds))) bad('Image and storyboard descriptions are incomplete')
+    const errors = []
+    for (const key of ['title', 'coverText', 'cover']) if (typeof raw[key] !== 'string' || !raw[key].trim()) errors.push(`${key}: required nonempty string${key === 'cover' ? ' containing the cover image prompt' : ''}`)
+    for (const key of ['facts', 'outline', 'images', 'shots']) if (!Array.isArray(raw[key])) errors.push(`${key}: required array`)
+    for (const [key, max] of [['facts', 8], ['outline', 6]]) if (Array.isArray(raw[key]) && raw[key].length > max) errors.push(`${key}: at most ${max} entries; received ${raw[key].length}`)
+    for (const [key, count] of [['images', settings.imageCount], ['shots', settings.shotCount]]) if (Array.isArray(raw[key]) && raw[key].length !== count) errors.push(`${key}: exactly ${count} entries required; received ${raw[key].length}`)
+    if (Array.isArray(raw.images) && raw.images.some(row => !row || typeof row.prompt !== 'string' || !row.prompt.trim())) errors.push('images: each entry requires a nonempty prompt string')
+    if (Array.isArray(raw.shots) && raw.shots.some(row => !row || typeof row.prompt !== 'string' || !row.prompt.trim() || typeof row.voice !== 'string' || !Number.isFinite(row.seconds))) errors.push('shots: each entry requires a nonempty prompt string, voice string and numeric seconds')
+    if (errors.length) bad('Invalid plan: ' + errors.join('; ') + '. Correct these fields and resubmit the same stageId. Counts use the frozen stage.settings returned by media_desk_read, including when imageReady is false.')
   }
 
   acceptPlan(draft, stage) {
