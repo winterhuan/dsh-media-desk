@@ -206,13 +206,12 @@ export class Producer {
     this.jobs.get(id)?.controller.abort()
     await this.store.mutate('取消成稿', draft => {
       const stages = (draft.nativeRequests ?? []).filter(stage => stage.workId === id && ['pending', 'running', 'waiting', 'candidate', 'save-failed'].includes(stage.status))
-      for (const stage of stages) { stage.status = 'cancelled'; stage.pendingInput = [] }
+      for (const stage of stages) { stage.status = 'cancelled' }
       const work = draft.items.find(row => row.id === id)
       const production = work?.production
       if (production && (stages.length || production.status === 'running' || this.anyAssetActive(id)
         || [production.cover, ...production.images ?? [], ...production.shots ?? []].some(asset => asset && ['pending', 'running'].includes(asset.status)))) {
         work.production.status = 'cancelled'
-        work.production.pendingInput = []
         for (const asset of [work.production.cover, ...work.production.images ?? [], ...work.production.shots ?? []]) if (asset && ['pending', 'running'].includes(asset.status)) asset.status = 'cancelled'
       }
     }, { undoable: false })
@@ -435,7 +434,6 @@ export class Producer {
     await this.patch(id, (next) => {
       if (next.status === 'running') {
         next.status = 'interrupted'
-        next.pendingInput = []
         next.stage = 'done'
         next.error = tr('上次成稿被中断了，可以重新开始')
       }

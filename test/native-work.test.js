@@ -103,7 +103,7 @@ test('原生成稿先接受策划，再接受脚本；无图模式不使用模�
   assert.equal(work.production.article, '## Evidence\n\nA dated native result.')
   const stages = state.nativeRequests.filter(row => row.workId === work.id)
   assert.deepEqual(stages.map(row => row.kind), ['plan', 'article'])
-  assert.ok(stages.every(row => row.status === 'accepted' && row.acceptance?.id && row.endSeq >= row.startSeq))
+  assert.ok(stages.every(row => row.status === 'accepted' && state.receipts.some(receipt => receipt.resultKey === 'stage:' + row.id) && row.endSeq >= row.startSeq))
   assert.match(await readFile(join(work.content.notesRoot, work.content.relativePath), 'utf8'), /A dated native result/)
   for (const stage of stages) {
     const events = await runtime.events(stage.sessionId)

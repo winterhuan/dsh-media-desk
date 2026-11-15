@@ -151,7 +151,7 @@ test('原生偏好编辑在实际 hydration 和接受时核验，重复已接受
   assert.equal(state.receipts.filter(row => row.resultKey.endsWith(':preference-duplicate')).length, 1)
 })
 
-test('原生问题与审批使业务阶段等待，回答继续，Stop 和重置清除等待', { timeout: 180000 }, async t => {
+test('进度从原生 Session 读取问题与审批，回答继续，Stop 和重置清除等待', { timeout: 180000 }, async t => {
   const recipes = { MD_STAGE_plan: { calls: [read, question, approval, submit], reply: 'Plan accepted after native answers.' }, MD_STAGE_article: { calls: [read, { name: 'media_desk_submit_result', arguments: { stageId: '$stageId', result: JSON.stringify({ article: 'Native answers retained.', sources: [] }) } }], reply: 'Article submitted.' } }
   const runtime = await nativeRuntime(t, { recipes, env: { DSH_PERMISSION_MODE: 'workspace-write' } })
   await runtime.start()
@@ -170,22 +170,21 @@ test('原生问题与审批使业务阶段等待，回答继续，Stop 和重置
     }
   }
   const asked = await next('user-questions/request', 'initial question')
-  const waiting = await waitState(runtime, state => state.nativeRequests.at(-1).status === 'waiting')
-  assert.deepEqual(waiting.nativeRequests.at(-1).pendingInput, ['question'])
-  assert.deepEqual(waiting.items.find(row => row.id === 'seed_2').production.pendingInput, ['question'])
+  const waiting = await waitState(runtime, state => state.nativeRequests.at(-1).status === 'running')
+  assert.equal(waiting.nativeRequests.at(-1).pendingInput, undefined)
+  assert.deepEqual((await runtime.host('production?id=seed_2')).value.live.pendingInput, ['question'])
   assert.ok((await runtime.rpc('session/state', { request: { sessionId } })).value.pendingInput.includes('question'))
   const durable = JSON.parse(await readFile(join(runtime.home, 'media-desk', 'state.json'), 'utf8'))
-  assert.equal(durable.nativeRequests.at(-1).status, 'waiting')
+  assert.equal(durable.nativeRequests.at(-1).status, 'running')
   await interactions.answer(asked, { answers: [{ id: 'direction', selected: ['Dated'] }] })
   const approved = await next('approval/request', 'approval')
-  const approving = await waitState(runtime, state => state.nativeRequests.at(-1).pendingInput?.includes('approval'))
-  assert.equal(approving.nativeRequests.at(-1).status, 'waiting')
+  assert.deepEqual((await runtime.host('production?id=seed_2')).value.live.pendingInput, ['approval'])
   assert.ok((await runtime.rpc('session/state', { request: { sessionId } })).value.pendingInput.includes('approval'))
   await interactions.answer(approved, 'allowed-once')
   const done = await waitState(runtime, state => state.items.find(row => row.id === 'seed_2').production.status === 'done')
   assert.ok(done.nativeRequests.every(row => row.status === 'accepted'))
-  assert.deepEqual(done.nativeRequests.find(row => row.kind === 'plan').pendingInput, [])
-  assert.deepEqual(done.items.find(row => row.id === 'seed_2').production.pendingInput, [])
+  assert.equal(done.nativeRequests.find(row => row.kind === 'plan').pendingInput, undefined)
+  assert.deepEqual((await runtime.host('production?id=seed_2')).value.live.pendingInput, [])
   assert.equal(await readFile(join(runtime.wiki, 'wait-approved.txt'), 'utf8'), 'approved\n')
   for (const action of ['cancel', 'chat/clear']) {
     await runtime.host('produce', { id: 'seed_2' })
@@ -195,12 +194,12 @@ test('原生问题与审批使业务阶段等待，回答继续，Stop 和重置
       await interactions.answer(pending, { answers: [{ id: 'direction', selected: ['Dated'] }] })
       await next('approval/request', 'reset approval')
     }
-    await waitState(runtime, state => state.nativeRequests.at(-1).status === 'waiting')
+    await waitState(runtime, state => state.nativeRequests.at(-1).status === 'running')
     const response = action === 'cancel' ? await runtime.rpc('session/cancel', { request: { sessionId } }) : await runtime.host(action, { workId: 'seed_2' })
     assert.equal(action === 'cancel' ? response.ok : response.status === 200, true)
     const stopped = await waitState(runtime, state => ['interrupted', 'cancelled'].includes(state.nativeRequests.at(-1).status) && state.items.find(row => row.id === 'seed_2').production.status !== 'running')
-    assert.deepEqual(stopped.nativeRequests.at(-1).pendingInput, [])
-    assert.deepEqual(stopped.items.find(row => row.id === 'seed_2').production.pendingInput, [])
+    assert.equal(stopped.nativeRequests.at(-1).pendingInput, undefined)
+    assert.deepEqual((await runtime.host('production?id=seed_2')).value.live.pendingInput, [])
     assert.equal((await runtime.rpc('session/state', { request: { sessionId } })).value.running, false)
   }
   await interactions.close()

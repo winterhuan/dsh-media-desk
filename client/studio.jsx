@@ -81,7 +81,7 @@ function ProgressCard({ production, live, settings }) {
   const shots = production.shots ?? []
   const count = list => list.filter(a => a.src).length
   const planned = production.stage !== 'brief'
-  const waiting = production.pendingInput?.length > 0
+  const waiting = live?.pendingInput?.length > 0
   const steps = [
     { label: t('标题和封面字'), done: planned, active: !planned },
     { label: production.article ? t('脚本 {n} 字', { n: words, s: plural(words, '', 's') }) : words ? t('正在写 {n} 字', { n: words, s: plural(words, '', 's') }) : t('脚本'), done: Boolean(production.article), active: planned && !production.article },
@@ -92,7 +92,7 @@ function ProgressCard({ production, live, settings }) {
   ]
   return (
     <div className="md-progress-card">
-      {waiting ? <p className="md-idea-hint">{production.pendingInput.includes('approval') ? t('请在对话中批准或拒绝操作') : t('请在对话中回答问题')}</p> : null}
+      {waiting ? <p className="md-idea-hint">{live?.pendingInput.includes('approval') ? t('请在对话中批准或拒绝操作') : t('请在对话中回答问题')}</p> : null}
       {steps.map((step, index) => (
         <div key={index} className={`md-progress-step ${step.done ? 'is-done' : step.active && running && (!waiting || index > 1) ? 'is-active' : ''}`}>
           <i>{step.done ? <Icon name="check" size={10} stroke={2.6} /> : null}</i>

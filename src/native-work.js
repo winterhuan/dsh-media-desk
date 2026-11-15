@@ -1,4 +1,4 @@
-/** Host-owned native input accounting and candidate acceptance for registered creative objects. */
+/** Host-owned native stage binding and candidate acceptance for registered creative objects. */
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -15,7 +15,7 @@ const stageText = row => `Media Desk stage ${row.id} (${row.kind}).\n${row.instr
 const readonly = messages => messages.some(message => message.source?.kind === 'user'
   && /\bread[ -]only\b|只读|禁止写入|不要(?:保存|写入|修改)/i.test(message.content.filter(block => block.type === 'text').map(block => block.text).join('\n')))
 
-/** One Host service for native inputs, ordinary edits and structured stages. */
+/** One Host service for native stages, ordinary edits and structured stages. */
 export class NativeWork {
   constructor(ctx, store, sessions) {
     this.ctx = ctx
@@ -23,10 +23,7 @@ export class NativeWork {
     this.sessions = sessions
     this.agents = new Map()
     this.barriers = new Map()
-    this.failedInputs = new Set()
-    this.failedWaits = new Set()
     this.recoveryPending = new Set()
-    this.waits = new Map()
   }
 
   /** Startup records uncertain work without repeating model, image or Wiki effects. */
@@ -42,12 +39,9 @@ export class NativeWork {
     if (!state.nativeRequests?.some(row => active(row))) return
     await this.store.mutate('记录中断的原生受理', draft => {
       for (const row of draft.nativeRequests ?? []) if (active(row)) {
-        row.pendingInput = []
         if (interrupted.has(row.id) || row.status === 'pending' && row.turn === undefined) {
           row.status = 'interrupted'; row.error = 'Native admission was interrupted; inspect the retained Session before retrying'
         } else if (row.status === 'waiting') row.status = row.candidateSaved ? 'candidate' : 'running'
-        const production = draft.items.find(item => item.id === row.workId)?.production
-        if (production && (production.attemptId === row.id || production.attemptId === row.data.planId)) production.pendingInput = []
       }
     }, { undoable: false })
   }
@@ -73,15 +67,11 @@ export class NativeWork {
 
   /** Register native listeners before a creative Agent can consume input after cold recovery. */
   attach(ctx) {
-    for (const [event, kind] of [['user-questions/request', 'question'], ['approval/request', 'approval']]) {
-      ctx.on(event, (request, next) => this.store.owner.track(() => this.wait(request, next, kind)), { prepend: true })
-    }
     ctx.on('agent/pre-step', async (payload, next) => {
-      try { await this.prepare(payload) } catch (error) {
-        this.failedInputs.add(payload.agent.id)
+      // Prompt dispatch can inherit a Store write; stage binding must queue independently.
+      try { await this.store.owner.track(() => this.prepare(payload)) } catch (error) {
         this.ctx.logger.error(error)
       }
-      // A failed business record blocks acceptance, while the claimed native input still runs.
       return next()
     })
     ctx.on('session/event', (session, event) => {
@@ -97,60 +87,22 @@ export class NativeWork {
     ctx.on('agent/disposed', ({ agent }) => { this.agents.delete(agent.id) })
   }
 
-  applyWaits(draft, sessionId) {
-    const pendingInput = [...new Set([...(this.waits.get(sessionId) ?? [])].map(row => row.kind))]
-    for (const row of draft.nativeRequests ?? []) if (row.sessionId === sessionId && row.turn !== undefined && active(row) && row.status !== 'save-failed') {
-      row.pendingInput = pendingInput
-      row.status = pendingInput.length ? 'waiting' : row.candidateSaved ? 'candidate' : 'running'
-      const production = draft.items.find(item => item.id === row.workId)?.production
-      if (production && (production.attemptId === row.id || production.attemptId === row.data.planId)) production.pendingInput = pendingInput
-    }
-  }
-
-  /** Native answerers retain authority; no Store write queue is held while the user answers. */
-  async wait(request, next, kind) {
-    const sessionId = request.agent.id
-    const token = { kind }
-    const waits = this.waits.get(sessionId) ?? new Set()
-    this.waits.set(sessionId, waits)
-    waits.add(token)
-    const record = async () => {
-      try {
-        await this.store.mutate('原生任务等待输入', draft => this.applyWaits(draft, sessionId), { undoable: false })
-        this.failedWaits.delete(sessionId)
-      } catch (error) { this.failedWaits.add(sessionId); this.ctx.logger.error(error) }
-    }
-    await record()
-    try { return await next() } finally {
-      waits.delete(token)
-      if (!waits.size) this.waits.delete(sessionId)
-      await record()
-    }
-  }
-
   async prepare({ agent, messages, turn, step, modelSelection }) {
     await this.barriers.get(agent.id)
     const association = this.sessions.requireAssociation(agent)
     this.agents.set(agent.id, agent)
+    const state = await this.store.read()
+    if (!state.nativeRequests?.some(row => row.associationId === association.id && active(row))) return
     const history = await this.events(agent.id)
     const startSeq = history.findLast(event => event.type === 'turn/start' && event.data.turn === turn)?.seq
     if (startSeq === undefined) throw failure('native/turn-missing', 'Native turn start is unavailable')
     const incoming = messages.filter(message => message.source?.kind === 'user')
     const interrupted = []
     await this.store.mutate('原生输入', draft => {
-      draft.nativeInputs ??= []
       for (const message of incoming) {
         const request = draft.nativeRequests?.find(row => row.associationId === association.id && row.requestId === message.source.rpcId && active(row))
         const insertion = history.find(event => event.type === 'agent/inbox/spliced' && event.data.inserted.some(row => row.id === message.id))
-        const input = { sessionId: agent.id, messageId: message.id, requestId: message.source.rpcId ?? null, turn, startSeq,
-          target: insertion?.data.target, fingerprint: hash(message), source: message.source,
-          steps: [{ step, model: { ...modelSelection } }], readOnly: readonly([message]), selectionVersions: {} }
-        for (const block of message.content) if (block.type === 'text') {
-          for (const match of block.text.matchAll(/\[Media Desk selection: (\{[^\n]+\})\]/g)) Object.assign(input.selectionVersions, JSON.parse(match[1]))
-        }
-        const old = draft.nativeInputs.find(row => row.sessionId === agent.id && row.messageId === message.id)
-        if (!old) draft.nativeInputs.push(input)
-        else if (!old.steps.some(row => row.step === step)) old.steps.push(...input.steps)
+        const input = { target: insertion?.data.target, fingerprint: hash(message) }
         for (const row of draft.nativeRequests ?? []) if (row.associationId === association.id && active(row)) {
           if (row !== request || row.inputFingerprint && row.inputFingerprint !== input.fingerprint
             || row.inputTarget && row.inputTarget !== input.target
@@ -173,12 +125,15 @@ export class NativeWork {
         request.actualModels ??= []
         if (!request.actualModels.some(row => row.step === step)) request.actualModels.push({ step, ...modelSelection })
       }
-      if (this.failedWaits.has(agent.id)) this.applyWaits(draft, agent.id)
     }, { undoable: false })
-    // Empty steps cannot recover a claimed input that never reached Store.
-    if (incoming.length) this.failedInputs.delete(agent.id)
-    this.failedWaits.delete(agent.id)
     for (const row of interrupted) await this.ctx.mediaDesk.producer?.nativeEnded(row)
+  }
+
+  async pendingInput(state, workId) {
+    const stage = state.nativeRequests?.findLast(row => row.workId === workId && row.turn !== undefined && active(row) && row.status !== 'save-failed')
+    if (!stage || !this.sessions.associations.some(row => row.id === stage.associationId && row.sessionId === stage.sessionId && row.active !== false && row.status === 'bound')) return []
+    const native = await this.service('sessionController').state({ sessionId: stage.sessionId }, this.store.owner.signal)
+    return native.running ? native.pendingInput : []
   }
 
   async observe(session, event) {
@@ -208,7 +163,7 @@ export class NativeWork {
       await this.finish(agent.id, request.turn, { schedule: !this.recoveryPending.has(agent.id) })
       if (this.recoveryPending.has(agent.id)) await this.store.mutate('核对中断的原生轮次', draft => {
         const row = draft.nativeRequests.find(row => row.id === request.id)
-        if (active(row) && row.status !== 'save-failed') { row.status = 'interrupted'; row.pendingInput = []; row.error = 'The original native turn has no durable successful result' }
+        if (active(row) && row.status !== 'save-failed') { row.status = 'interrupted'; row.error = 'The original native turn has no durable successful result' }
       }, { undoable: false })
     }
     this.recoveryPending.delete(agent.id)
@@ -217,15 +172,17 @@ export class NativeWork {
   async actor(exec, write = false, checkSelection = write) {
     exec.signal.throwIfAborted()
     const association = this.sessions.requireAssociation(exec.agent)
-    if (this.failedInputs.has(exec.agent.id) || this.failedWaits.has(exec.agent.id)) throw failure('native/input-unsaved', 'Native input could not be recorded; retry after repairing storage')
     const state = await this.store.read()
     const events = await this.events(exec.agent.id)
     const call = events.findLast(row => row.type === 'tool/call' && row.data.callId === (exec.rootCallId ?? exec.callId))
-    const start = call && events.findLast(row => row.type === 'turn/start' && row.data.turn === call.data.turn)
+    const start = call && events.findLast(row => row.type === 'turn/start' && row.data.turn === call.data.turn && row.seq < call.seq)
     const message = start && events.findLast(row => row.type === 'user/message' && row.seq > start.seq && row.seq < call.seq && row.data.source?.kind === 'user')?.data
-    const current = message && state.nativeInputs?.findLast(row => row.sessionId === exec.agent.id && row.turn === call.data.turn
-      && row.messageId === message.id && row.fingerprint === hash(message))
-    if (!current) throw failure('native/input-missing', 'No recorded native user input authorizes this operation')
+    if (!message) throw failure('native/input-missing', 'No current native user input authorizes this operation')
+    const current = { turn: call.data.turn, messageId: message.id, fingerprint: hash(message),
+      readOnly: readonly([message]), selectionVersions: {} }
+    for (const block of message.content) if (block.type === 'text') {
+      for (const match of block.text.matchAll(/\[Media Desk selection: (\{[^\n]+\})\]/g)) Object.assign(current.selectionVersions, JSON.parse(match[1]))
+    }
     if (write && current.readOnly) throw failure('native/read-only', 'This input permits reading only', 403)
     if (checkSelection) this.store.notes.assertExpected(state, current.selectionVersions ?? {})
     return { association, state, current }
@@ -379,7 +336,6 @@ export class NativeWork {
         validateAcceptance: () => {
           exec.signal.throwIfAborted()
           this.sessions.requireAssociation(exec.agent)
-          if (this.failedInputs.has(exec.agent.id) || this.failedWaits.has(exec.agent.id)) throw failure('native/input-unsaved', 'Native input could not be recorded')
           for (const operation of revisions) if ((this.store.state.items.find(row => row.id === operation.id)?.production?.attemptId ?? null) !== (operation.attemptId ?? null)) {
             throw failure('native/production-conflict', 'Production attempt changed before acceptance')
           }
@@ -486,11 +442,12 @@ export class NativeWork {
     return this.store.run(async () => {
     const { association, state, current } = await this.actor(exec, true)
     const stage = state.nativeRequests?.find(row => row.id === stageId)
-    if (!stage || stage.associationId !== association.id || stage.turn !== current.turn) throw failure('native/foreign-stage', 'Stage is not owned by this native turn', 403)
+    if (!stage || stage.associationId !== association.id || stage.turn !== current.turn || stage.messageId !== current.messageId || stage.inputFingerprint !== current.fingerprint) throw failure('native/foreign-stage', 'Stage is not owned by this native turn', 403)
     const resultHash = hash(result)
     if (stage.candidateHash) {
       if (stage.candidateHash !== resultHash) throw failure('native/result-conflict', 'Stage already has a different candidate')
-      if (stage.acceptance) return { status: 'accepted', acceptance: stage.acceptance }
+      const acceptance = state.receipts?.find(row => row.resultKey === 'stage:' + stage.id)
+      if (acceptance) return { status: 'accepted', acceptance }
       if (stage.status === 'candidate') return { status: 'candidate', stageId }
     }
     if (!active(stage)) throw failure('native/stage-stale', 'Stage was interrupted or canceled')
@@ -528,8 +485,9 @@ export class NativeWork {
     const end = events.find(event => event.type === 'turn/end' && event.data.turn === turn)
     if (!end) return
     for (const stage of stages) {
-      const input = events.find(event => event.type === 'user/message' && event.data.id === stage.messageId && hash(event.data) === stage.inputFingerprint)
-      if (end.data.reason.kind !== 'completed' || !input || !stage.candidateSaved && !stage.candidate) {
+      const input = events.findLast(event => event.type === 'user/message' && event.seq < end.seq && event.data.source?.kind === 'user')
+      const matchingInput = input?.data.id === stage.messageId && hash(input.data) === stage.inputFingerprint
+      if (end.data.reason.kind !== 'completed' || !matchingInput || !stage.candidateSaved && !stage.candidate) {
         let saveError
         try { this.store.notes.assertExpected(state, stage.expectedContent) } catch (error) { saveError = error.message }
         await this.store.mutate('原生任务结束', draft => {
@@ -544,7 +502,7 @@ export class NativeWork {
       }
       const validate = () => {
         const current = this.store.activeDraft?.nativeRequests?.find(row => row.id === stage.id) ?? this.store.state.nativeRequests?.find(row => row.id === stage.id)
-        if (!current || !active(current) || current.candidateHash !== stage.candidateHash || this.failedInputs.has(sessionId) || this.failedWaits.has(sessionId)) throw failure('native/stage-stale', 'Native stage is no longer current')
+        if (!current || !active(current) || current.candidateHash !== stage.candidateHash) throw failure('native/stage-stale', 'Native stage is no longer current')
         const association = this.sessions.requireAssociation(resolved.agent)
         if (association.id !== stage.associationId) throw failure('native/stage-stale', 'The work uses another conversation')
         if (stage.kind === 'article' && (this.store.activeDraft ?? this.store.state).items.find(row => row.id === stage.workId)?.production?.attemptId !== stage.data.planId) {
@@ -567,7 +525,6 @@ export class NativeWork {
           return { stageId: stage.id, workId: stage.workId }
         }, { undoable: stage.kind !== 'style', expectedContent: stage.expectedContent, resultKey: `stage:${stage.id}`, payloadHash: stage.candidateHash,
           validateAcceptance: validate })
-        await this.store.mutate('保存原生回执', draft => { draft.nativeRequests.find(row => row.id === stage.id).acceptance = result.acceptance }, { undoable: false })
         if (schedule) await this.ctx.mediaDesk.producer?.nativeAccepted(stage, result.acceptance)
         else if (stage.kind === 'article') await this.ctx.mediaDesk.producer?.complete(stage.workId, { recover: true, attemptId: stage.data.planId })
       } catch (error) {
@@ -610,9 +567,7 @@ export class NativeWork {
     const state = await this.store.read()
     const stages = state.nativeRequests?.filter(row => row.workId === workId && (active(row) || row.status === 'cancelled')) ?? []
     await this.store.mutate('取消原生任务', draft => {
-      for (const row of draft.nativeRequests ?? []) if (row.workId === workId && active(row)) { row.status = 'cancelled'; row.pendingInput = [] }
-      const production = draft.items.find(row => row.id === workId)?.production
-      if (production?.pendingInput?.length) production.pendingInput = []
+      for (const row of draft.nativeRequests ?? []) if (row.workId === workId && active(row)) { row.status = 'cancelled' }
     }, { undoable: false })
     const sessionIds = stages.map(row => row.sessionId).filter(Boolean)
     if (all) sessionIds.push(...this.sessions.associations.filter(row => row.workId === workId && row.active !== false).map(row => row.sessionId))
@@ -643,9 +598,10 @@ export class NativeWork {
     if (resolved.error) throw resolved.error
     this.agents.set(row.sessionId, resolved.agent)
     await this.finish(row.sessionId, row.turn)
-    const updated = (await this.store.read()).nativeRequests.find(stage => stage.id === stageId)
+    const saved = await this.store.read()
+    const updated = saved.nativeRequests.find(stage => stage.id === stageId)
     if (updated.status !== 'accepted') throw failure('native/save-failed', updated.error ?? 'Native save could not be accepted')
-    return { acceptance: updated.acceptance }
+    return { acceptance: saved.receipts?.find(receipt => receipt.resultKey === 'stage:' + stageId) }
   }
 
   /** Read an attempt's private service configuration for its owned image workers. */

@@ -215,7 +215,7 @@ async function route(ctx, store, desk, req, res) {
       const id = url.searchParams.get('id') ?? ''
       const state = await store.read()
       const item = state.items.find(row => row.id === id)
-      return json(res, 200, { item: item ?? null, production: item?.production ?? null, status: item?.status, live: desk.producer.status(id) })
+      return json(res, 200, { item: item ?? null, production: item?.production ?? null, status: item?.status, live: { ...desk.producer.status(id), pendingInput: await desk.nativeWork.pendingInput(state, id) } })
     }
     if (path === 'settings') return json(res, 200, { ...publicSettings(await desk.settings.read(), Boolean(imageTool(ctx))), defaultExportDir: defaultExportDir() })
     if (path === 'models') {
@@ -497,9 +497,8 @@ export default class MediaDeskHost extends Service {
       await this.store.mutate('停止创作任务', draft => {
         for (const stage of draft.nativeRequests ?? []) if (['pending', 'running', 'waiting', 'candidate', 'save-failed'].includes(stage.status)) {
           if (stage.status !== 'save-failed') stage.status = 'interrupted'
-          stage.pendingInput = []
         }
-        for (const work of draft.items) if (work.production?.status === 'running') { work.production.status = 'cancelled'; work.production.pendingInput = [] }
+        for (const work of draft.items) if (work.production?.status === 'running') { work.production.status = 'cancelled' }
       }, { undoable: false })
     })
     this.ownership.beginShutdown()

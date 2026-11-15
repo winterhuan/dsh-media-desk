@@ -125,7 +125,7 @@ test('带选段输入的相同已接受原生编辑复用回执，新的旧选�
   assert.equal(state.items.find(row => row.id === selected.id).content.revision, selected.content.revision + 1)
 })
 
-test('原生问题等待时崩溃后清除业务等待，保留历史且新成稿创建新尝试', { timeout: 180000 }, async t => {
+test('原生问题等待时崩溃后进度不显示旧等待，保留历史且新成稿创建新尝试', { timeout: 180000 }, async t => {
   const question = { name: 'ask_user_question', arguments: { questions: [{ id: 'direction', question: 'Which source should be used?', options: [{ label: 'Dated', description: 'Dated source.' }, { label: 'Brief', description: 'Brief source.' }] }] } }
   const runtime = await nativeRuntime(t, { recipes: { MD_STAGE_plan: { calls: [question], reply: 'No candidate.' } } })
   await runtime.start()
@@ -135,10 +135,10 @@ test('原生问题等待时崩溃后清除业务等待，保留历史且新成�
   const association = (await runtime.host('sessions/open', { workId: 'seed_2' })).value.association
   await runtime.host('produce', { id: 'seed_2' })
   await interactions.next('user-questions/request', association.sessionId)
-  const waiting = await waitState(runtime, state => state.nativeRequests.at(-1).status === 'waiting')
+  const waiting = await waitState(runtime, state => state.nativeRequests.at(-1).status === 'running')
   const oldStage = waiting.nativeRequests.at(-1)
   const original = waiting.items.find(row => row.id === 'seed_2').body
-  assert.deepEqual(oldStage.pendingInput, ['question'])
+  assert.deepEqual((await runtime.host('production?id=seed_2')).value.live.pendingInput, ['question'])
   const modelRequests = await readFile(runtime.telemetryPath, 'utf8')
   const exit = await runtime.stop('SIGKILL')
   assert.equal(exit.signal, 'SIGKILL')
@@ -150,8 +150,8 @@ test('原生问题等待时崩溃后清除业务等待，保留历史且新成�
   const state = (await runtime.host('state')).value.state
   const recovered = state.nativeRequests.find(row => row.id === oldStage.id)
   assert.equal(recovered.status, 'interrupted')
-  assert.deepEqual(recovered.pendingInput, [])
-  assert.deepEqual(state.items.find(row => row.id === 'seed_2').production.pendingInput, [])
+  assert.equal(recovered.pendingInput, undefined)
+  assert.deepEqual((await runtime.host('production?id=seed_2')).value.live.pendingInput, [])
   assert.equal(state.items.find(row => row.id === 'seed_2').body, original)
   assert.equal(await readFile(runtime.telemetryPath, 'utf8'), modelRequests)
   assert.ok(!state.receipts.some(row => row.resultKey === 'stage:' + oldStage.id))

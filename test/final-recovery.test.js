@@ -64,7 +64,7 @@ test('正常停止后保留已完成轮次的 Notes 保存失败，同一候选�
     assert.notEqual(exit.signal, 'SIGKILL')
     const stopped = JSON.parse(await readFile(stateFile(runtime), 'utf8')).nativeRequests.find(row => row.id === stage.id)
     assert.equal(stopped.status, 'save-failed')
-    assert.deepEqual(stopped.pendingInput, [])
+    assert.equal(stopped.pendingInput, undefined)
     await runtime.start()
     const recovered = (await runtime.host('state')).value.state
     assert.equal(recovered.nativeRequests.find(row => row.id === stage.id).status, 'save-failed')
@@ -77,7 +77,7 @@ test('正常停止后保留已完成轮次的 Notes 保存失败，同一候选�
     assert.equal(accepted.turn, stage.turn)
     assert.equal(accepted.messageId, stage.messageId)
     assert.equal(accepted.candidateHash, stage.candidateHash)
-    assert.equal(accepted.acceptance.id, journal.id)
+    assert.equal(retried.value.state.receipts.find(row => row.resultKey === 'stage:' + stage.id).id, journal.id)
     assert.equal(retried.value.state.items.find(row => row.id === work.id).body, article.article)
     assert.equal(retried.value.state.items.find(row => row.id === work.id).content.revision, work.content.revision + 1)
     const duplicate = await runtime.host('native/retry', { id: stage.id })
