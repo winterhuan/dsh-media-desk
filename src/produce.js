@@ -142,7 +142,6 @@ export class Producer {
     this.generate = generate
     this.ready = ready
     this.jobs = new Map()
-    this.assets = new Set()
     this.pending = new Set()
     this.pendingByWork = new Map()
     this.assetControllers = new Map()
@@ -171,20 +170,6 @@ export class Producer {
 
   isRunning(id) {
     return this.jobs.has(id)
-  }
-
-  status(id) {
-    const job = this.jobs.get(id)
-    if (!job) return { running: false }
-    // 策划案是流式写出来的：标题和分镜一出现就先显示
-    const plan = job.planText
-    return {
-      running: true,
-      stage: job.stage,
-      text: job.text,
-      title: /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(plan)?.[1],
-      visuals: [...plan.matchAll(/"visual"\s*:\s*"((?:[^"\\]|\\.)*)"/g)].map(m => m[1]),
-    }
   }
 
   patch(id, mutate, expectedContent = {}) {
@@ -258,7 +243,7 @@ export class Producer {
     const state = await this.store.read()
     const item = state.items.find(row => row.id === stage.workId)
     if (!item?.production || item.production.attemptId !== stage.id || item.production.status !== 'running') return
-    const job = { stage: 'making', text: '', planText: '', controller: new AbortController(), attemptId: stage.id }
+    const job = { controller: new AbortController(), attemptId: stage.id }
     const tasks = []
     try {
       const settings = await this.native.productionSettings(stage.id)
@@ -270,10 +255,9 @@ export class Producer {
         return true
       })
       if (!owned) return
-      const article = await this.native.request('article', stage.workId,
+      await this.native.request('article', stage.workId,
         'Write the complete Markdown script based on the accepted plan, facts and sources. Use llm-wiki to check relevant evidence. Submit article and dated sources through media_desk_submit_result.',
         { data: { planId: stage.id, preferenceVersions: stage.data.preferenceVersions, materialVersion: stage.data.materialVersion, language: stage.data.language } })
-      job.articleStageId = article.id
       const current = await this.store.read()
       const latest = current.items.find(row => row.id === stage.workId)?.production
       if (this.jobs.get(stage.workId) !== job || job.controller.signal.aborted || latest?.attemptId !== stage.id || latest.status !== 'running') {
@@ -397,11 +381,10 @@ export class Producer {
     if (this.closing) throw Object.assign(new Error(tr('Media Desk 正在关闭，请稍后重试')), { status: 503 })
     if (!parseTarget(target)) throw Object.assign(new Error(tr('目标无效')), { status: 400 })
     const key = `${id}:${target}`
-    if (this.assets.has(key)) return
-    this.assets.add(key)
+    if (this.assetControllers.has(key)) return
     const controller = new AbortController()
     this.assetControllers.set(key, controller)
-    const release = () => { this.assets.delete(key); this.assetControllers.delete(key) }
+    const release = () => this.assetControllers.delete(key)
     try {
       const settings = await this.settings.read()
       if (!this.ready(settings)) throw Object.assign(new Error(tr('还没有接入生图模型')), { status: 400 })
@@ -448,6 +431,6 @@ export class Producer {
   }
 
   anyAssetActive(id) {
-    return [...this.assets].some(key => key.startsWith(`${id}:`))
+    return [...this.assetControllers.keys()].some(key => key.startsWith(`${id}:`))
   }
 }

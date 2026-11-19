@@ -213,9 +213,8 @@ async function route(ctx, store, desk, req, res) {
     }
     if (path === 'production') {
       const id = url.searchParams.get('id') ?? ''
-      const state = await store.read()
-      const item = state.items.find(row => row.id === id)
-      return json(res, 200, { item: item ?? null, production: item?.production ?? null, status: item?.status, live: { ...desk.producer.status(id), pendingInput: await desk.nativeWork.pendingInput(state, id) } })
+      const item = await store.readWork(id)
+      return json(res, 200, { item, production: item?.production ?? null, status: item?.status, live: { running: desk.producer.isRunning(id), pendingInput: await desk.nativeWork.pendingInput(store.state, id) } })
     }
     if (path === 'settings') return json(res, 200, { ...publicSettings(await desk.settings.read(), Boolean(imageTool(ctx))), defaultExportDir: defaultExportDir() })
     if (path === 'models') {

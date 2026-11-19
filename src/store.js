@@ -5,6 +5,7 @@ import { readFileSync, renameSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { setTimeout as delay } from 'node:timers/promises'
 import { buildSeed, localizeSamples, migrateState, sampleText } from './seed.js'
 import { NotesWrites } from './notes-writes.js'
@@ -84,6 +85,7 @@ export class Store {
     this.undo = []
     this.queue = Promise.resolve()
     this.owner = owner
+    this.editContext = owner?.context ?? new AsyncLocalStorage()
   }
 
   async refresh() {
@@ -152,6 +154,11 @@ export class Store {
   get canUndo() { return this.undoEntries.length > 0 }
   get migration() { return this.notesMigration ??= new NotesMigration(this) }
 
+  get activeDraft() {
+    const scope = this.editContext.getStore()
+    return scope?.store === this ? scope.draft : undefined
+  }
+
   async hydrated() {
     if (!this.notes) return structuredClone(this.state)
     await this.writes.recover()
@@ -179,6 +186,21 @@ export class Store {
     return this.run(async () => {
       await this.refresh()
       return this.hydrated()
+    })
+  }
+
+  /** Project a single work for progress polling. External changes also refresh the shared Notes index. */
+  readWork(id) {
+    return this.run(async () => {
+      await this.refresh()
+      await this.writes.recover(id)
+      const item = this.state.items.find(row => row.id === id)
+      if (!item) return null
+      const saved = { items: [item], notesRevisions: this.state.notesRevisions, contentRevisions: this.state.contentRevisions }
+      const next = structuredClone(saved)
+      const projected = await this.notes.hydrate(next)
+      if (same(saved, next)) return projected.items[0]
+      return (await this.hydrated()).items.find(row => row.id === id) ?? null
     })
   }
 
@@ -218,10 +240,12 @@ export class Store {
       this.notes?.assertExpected(draft, expectedContent)
       const previous = structuredClone(draft)
       const before = undoable && !this.notes ? JSON.stringify(draft) : null
-      const parentDraft = this.activeDraft
-      this.activeDraft = draft
+      const scope = { ...this.editContext.getStore(), store: this, draft }
       let result
-      try { result = await mutate(draft) } finally { this.activeDraft = parentDraft }
+      try { result = await this.editContext.run(scope, () => mutate(draft)) } finally {
+        scope.draft = undefined
+        scope.active = false
+      }
       const acceptance = await this.commitEdit(previous, draft, { resultKey, payloadHash, label, result, validateAcceptance, undoable, expectedContent })
       if (undoable && !this.notes) {
         const after = JSON.stringify(draft)

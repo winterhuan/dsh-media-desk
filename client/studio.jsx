@@ -10,14 +10,6 @@ import { SPRING_SNAP, SPRING_SOFT, STYLE_CATEGORIES, fmtDate, fmtWhen, reducedMo
 
 const isBusy = asset => ['pending', 'running'].includes(asset?.status)
 
-function unescapeJson(text) {
-  try {
-    return JSON.parse(`"${text}"`)
-  } catch {
-    return text
-  }
-}
-
 function AutoText({ value, content, onCommit, className, label, disabled }) {
   const [draft, setDraft] = React.useState(value ?? '')
   const ref = React.useRef(null)
@@ -76,7 +68,7 @@ function Plate({ asset, paper = false, mark = null, alt = '', onOpen, onRetry })
 function ProgressCard({ production, live, settings }) {
   const running = production.status === 'running'
   const ready = settings?.imageReady
-  const words = textLength(production.article || live?.text || '')
+  const words = textLength(production.article || '')
   const visuals = [production.cover, ...(production.images ?? [])].filter(Boolean)
   const shots = production.shots ?? []
   const count = list => list.filter(a => a.src).length
@@ -84,7 +76,7 @@ function ProgressCard({ production, live, settings }) {
   const waiting = live?.pendingInput?.length > 0
   const steps = [
     { label: t('标题和封面字'), done: planned, active: !planned },
-    { label: production.article ? t('脚本 {n} 字', { n: words, s: plural(words, '', 's') }) : words ? t('正在写 {n} 字', { n: words, s: plural(words, '', 's') }) : t('脚本'), done: Boolean(production.article), active: planned && !production.article },
+    { label: production.article ? t('脚本 {n} 字', { n: words, s: plural(words, '', 's') }) : t('脚本'), done: Boolean(production.article), active: planned && !production.article },
     ...(ready ? [
       { label: t('封面和配图 {done}/{total}', { done: count(visuals), total: visuals.length || 1 + (settings?.imageCount ?? 2) }), done: planned && visuals.length > 0 && !visuals.some(isBusy), active: visuals.some(isBusy) },
       { label: t('分镜 {done}/{total}', { done: count(shots), total: shots.length || settings?.shotCount || 6 }), done: planned && shots.length > 0 && !shots.some(isBusy), active: shots.some(isBusy) },
@@ -152,14 +144,13 @@ function Stat({ icon, value, unit }) {
 }
 
 /** 主视觉：渐变底、大标题、数字，右边是视频封面和配图的拼贴。 */
-function HeroTile({ item, live, onView }) {
+function HeroTile({ item, onView }) {
   const settings = useDesk(s => s.settings)
   const production = item.production
   const running = production?.status === 'running'
-  const liveTitle = production?.stage === 'brief' && live?.title ? unescapeJson(live.title) : null
-  const title = liveTitle ?? (item.content ? item.title : production?.title ?? item.title)
+  const title = item.content ? item.title : production?.title ?? item.title
   const article = item.content ? item.body : production?.article
-  const words = textLength(article || live?.text || '')
+  const words = textLength(article || '')
   const shots = production?.shots ?? []
   const seconds = shots.reduce((sum, shot) => sum + (shot.seconds ?? 0), 0)
   const images = production?.images ?? []
@@ -260,7 +251,7 @@ function ArticleBody({ production, text, onView }) {
   )
 }
 
-function ArticleTile({ item, live, open, onToggle, onView, tileRef }) {
+function ArticleTile({ item, open, onToggle, onView, tileRef }) {
   const production = item.production
   const running = production?.status === 'running'
   const content = item.content
@@ -271,12 +262,7 @@ function ArticleTile({ item, live, open, onToggle, onView, tileRef }) {
   const [saveError, setSaveError] = React.useState(null)
   const [picked, setPicked] = React.useState(null)
   const article = content ? item.body ?? '' : production?.article ?? ''
-  const text = article || (ready ? live?.text ?? '' : '').replace(/^\s*#\s+.*\n?/, '')
-  const streaming = ready && running && !article
   const changed = editor?.version && content && (editor.version.revision !== content.revision || editor.version.sha256 !== content.sha256)
-  React.useEffect(() => {
-    if (streaming && scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight
-  }, [text, streaming])
   // 写完之后回到开头，从第一句读起
   React.useEffect(() => {
     if (article && scroller.current) scroller.current.scrollTop = 0
@@ -340,7 +326,6 @@ function ArticleTile({ item, live, open, onToggle, onView, tileRef }) {
     const box = tileRef.current.getBoundingClientRect()
     setPicked({ text: value, version: item.content, x: Math.max(70, Math.min(rect.left - box.left + rect.width / 2, box.width - 70)), y: rect.top - box.top })
   }
-  const words = textLength(text)
   return (
     <>
       <header className="md-tile-head">
@@ -377,12 +362,11 @@ function ArticleTile({ item, live, open, onToggle, onView, tileRef }) {
       {saveError || changed ? <div className="md-note-status" role="alert"><p className="md-setup-note is-error">{saveError || t('作品已有新版本，当前修改仍保留。请取消修改并重新读取')}</p>
         {saveError ? <button type="button" className="md-link-btn" onClick={() => setDesk({ notesRecovery: true })}>{t('核对保留版本或重试保存')}</button> : null}
       </div> : null}
-      {streaming && content ? <p className="md-note-status md-muted">{t('生成预览，尚未保存')}</p> : null}
       {editor ? (
         <textarea className="md-article-edit" aria-label={content ? t('正文') : t('脚本')} value={editor.text} disabled={saving} onChange={e => setEditor(current => ({ ...current, text: e.target.value }))} />
-      ) : text ? (
+      ) : article ? (
         <div className="md-article-scroll" ref={scroller} onMouseUp={onMouseUp} onScroll={() => setPicked(null)}>
-          {open ? <ArticleBody production={production} text={text} onView={onView} /> : <div className="md-prose" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />}
+          {open ? <ArticleBody production={production} text={article} onView={onView} /> : <div className="md-prose" dangerouslySetInnerHTML={{ __html: renderMarkdown(article) }} />}
         </div>
       ) : content ? ready && <p className="md-note-status md-muted">{t('正文为空，点击直接修改开始写作')}</p> : (
         <div className={`md-skeleton ${running ? '' : 'is-still'}`} aria-hidden="true">{Array.from({ length: 12 }, (_, i) => <i key={i} />)}</div>
@@ -394,17 +378,14 @@ function ArticleTile({ item, live, open, onToggle, onView, tileRef }) {
           window.getSelection()?.removeAllRanges()
         }}><Icon name="chat" size={12} />{t('让助手改这段')}</button>
       ) : null}
-      {words && streaming ? <span className="md-tile-foot">{t('{n} 字', { n: words, s: plural(words, '', 's') })}</span> : null}
     </>
   )
 }
 
-function ShotsTile({ item, live, count, open, onToggle, onView }) {
+function ShotsTile({ item, count, open, onToggle, onView }) {
   const imageReady = useDesk(s => s.settings?.imageReady)
   const shots = item.production?.shots ?? []
-  const visuals = live?.visuals ?? []
-  // 策划案还在写的时候，分镜说明已经一格一格出现了
-  const cells = shots.length ? shots : Array.from({ length: count }, (_, i) => ({ no: i + 1, visual: visuals[i] ? unescapeJson(visuals[i]) : '', status: item.production?.status === 'running' ? 'pending' : 'idle' }))
+  const cells = shots.length ? shots : Array.from({ length: count }, (_, i) => ({ no: i + 1, visual: '', status: item.production?.status === 'running' ? 'pending' : 'idle' }))
   const copy = async () => {
     const table = shots.map((s, i) => t('{no}. {shot}｜{sec} 秒\n画面：{visual}\n口播：{voice}', { no: i + 1, shot: t(s.shot), sec: s.seconds, visual: s.visual, voice: s.voice })).join('\n\n')
     await navigator.clipboard.writeText(table)
@@ -492,7 +473,7 @@ function Viewer({ item, target, onChange, onClose }) {
   )
 }
 
-function Sheet({ item, live }) {
+function Sheet({ item }) {
   const settings = useDesk(s => s.settings)
   const [open, setOpen] = React.useState(null)
   const [viewing, setViewing] = React.useState(null)
@@ -555,12 +536,12 @@ function Sheet({ item, live }) {
   return (
     <div className="md-sheet">
       <div className={`md-bento ${open ? 'has-open' : ''}`} ref={bento}>
-        <HeroTile item={item} live={live} onView={setViewing} />
+        <HeroTile item={item} onView={setViewing} />
         <section {...tile('article')}>
-          <ArticleTile item={item} live={live} open={open === 'article'} onToggle={() => toggle('article')} onView={setViewing} tileRef={articleRef} />
+          <ArticleTile item={item} open={open === 'article'} onToggle={() => toggle('article')} onView={setViewing} tileRef={articleRef} />
         </section>
         <section {...tile('shots')}>
-          <ShotsTile item={item} live={live} count={settings?.shotCount ?? 6} open={open === 'shots'} onToggle={() => toggle('shots')} onView={setViewing} />
+          <ShotsTile item={item} count={settings?.shotCount ?? 6} open={open === 'shots'} onToggle={() => toggle('shots')} onView={setViewing} />
         </section>
       </div>
       {viewing ? <Viewer item={item} target={viewing} onChange={setViewing} onClose={() => setViewing(null)} /> : null}
@@ -586,7 +567,7 @@ export function Studio({ openSession, retainSession, SessionProvider, renderSlot
   const ref = React.useRef(null)
   const production = item?.production
   const running = production?.status === 'running'
-  const watching = Boolean(item?.content) || running || [production?.cover, ...(production?.images ?? []), ...(production?.shots ?? [])].some(isBusy)
+  const watching = running || [production?.cover, ...(production?.images ?? []), ...(production?.shots ?? [])].some(isBusy)
 
   React.useEffect(() => {
     if (id && watching) return watchProduction(id)
@@ -642,7 +623,7 @@ export function Studio({ openSession, retainSession, SessionProvider, renderSlot
         />
       </div>
       <button type="button" className="md-chat-toggle" aria-label={t('打开对话')} onClick={() => setDesk(s => ({ studioDock: !s.studioDock }))}><Icon name="chat" size={16} /></button>
-      <Sheet key={item.id} item={item} live={live} />
+      <Sheet key={item.id} item={item} />
     </div>
   )
 }

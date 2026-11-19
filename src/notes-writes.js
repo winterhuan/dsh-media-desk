@@ -282,11 +282,12 @@ export class NotesWrites {
     }
   }
 
-  async inspect() {
+  async inspect(workId) {
     for (const record of this.records) {
       record.observedConflicts = []
       const inodes = new Map()
       for (const entry of record.files) {
+        if (workId !== undefined && (entry.workId ?? entry.subjectId) !== workId) continue
         const references = [...(entry.displacements ?? [])]
         if (entry.displaced && !references.some(reference => reference.relativePath === entry.displaced.relativePath)) {
           if (await this.bytes(entry.displaced)) references.push(entry.displaced)
@@ -319,7 +320,7 @@ export class NotesWrites {
   }
 
   /** Recover only already published known edits; unstarted candidates require an explicit save retry. */
-  async recover() {
+  async recover(workId) {
     await this.load()
     const indexes = new Map()
     for (const record of [...this.records].sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
@@ -353,7 +354,7 @@ export class NotesWrites {
         try { await this.save(record) } catch (saveError) { record.error.persistence = saveError.code }
       }
     }
-    await this.inspect()
+    await this.inspect(workId)
   }
 
   pending(subjectId, kind = 'work') {

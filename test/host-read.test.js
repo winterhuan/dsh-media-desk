@@ -1,0 +1,81 @@
+import assert from 'node:assert/strict'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import test from 'node:test'
+import { applyOps } from '../src/ops.js'
+import { hostRuntime } from './fixtures/host-runtime.js'
+
+async function openDesk(t) {
+  const home = await mkdtemp(join(tmpdir(), 'media-desk-read-'))
+  const prior = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  let runtime
+  t.after(async () => {
+    try { await runtime?.close() } finally {
+      if (prior === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = prior
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+  runtime = await hostRuntime()
+  async function get(path) {
+    let result
+    await runtime.handler({ method: 'GET', url: '/media-desk/' + path, headers: {} }, {
+      setHeader() {},
+      end(body) { assert.equal(this.statusCode, 200, body); result = JSON.parse(body) },
+    })
+    return result
+  }
+  return { desk: runtime.ctx.get('mediaDesk'), get }
+}
+
+test('复盘等待并发编辑结算，嵌套读取仍使用当前草稿', async t => {
+  const { desk, get } = await openDesk(t)
+  const { store } = desk
+  const added = await store.mutate('Create', draft => applyOps(draft, [{ op: 'add_item', title: 'Held edit' }]))
+  const id = added.receipts[0].target
+  const before = (await get('insights')).published
+  for (const commit of [false, true]) {
+    const entered = Promise.withResolvers()
+    const release = Promise.withResolvers()
+    const edit = store.mutate('Publish', async draft => {
+      draft.items.find(item => item.id === id).status = 'published'
+      assert.equal((await store.read()).items.find(item => item.id === id).status, 'published')
+      entered.resolve()
+      await release.promise
+      if (!commit) throw new Error('Discard edit')
+    })
+    const outcome = commit ? edit : assert.rejects(edit, /Discard edit/)
+    await Promise.race([entered.promise, outcome])
+    const reading = Promise.withResolvers()
+    const read = store.read.bind(store)
+    const observer = t.mock.method(store, 'read', () => { reading.resolve(); return read() })
+    const insights = get('insights')
+    try { await Promise.race([reading.promise, insights]) } finally { release.resolve(); observer.mock.restore() }
+    await outcome
+    assert.equal((await insights).published, before + Number(commit))
+  }
+})
+
+test('单篇进度只读取目标正文，外部编辑的版本与全局读取一致', async t => {
+  const { desk, get } = await openDesk(t)
+  const { store } = desk
+  const ops = Array.from({ length: 100 }, (_, i) => ({ op: 'add_item', title: 'Read ' + i, body: 'original' }))
+  const added = await store.mutate('Create works', draft => applyOps(draft, ops))
+  const id = added.receipts[0].target
+  const item = (await store.read()).items.find(row => row.id === id)
+  await store.owner.drain()
+  const observer = t.mock.method(store.notes, 'readBytes')
+  const target = await get('production?id=' + id)
+  assert.deepEqual(target.item, item)
+  const primaryReads = observer.mock.calls.map(call => call.arguments[0].relativePath).filter(path => path.startsWith('works/'))
+  assert.deepEqual(primaryReads, [item.content.relativePath])
+  observer.mock.restore()
+  const path = join(item.content.notesRoot, item.content.relativePath)
+  await writeFile(path, (await readFile(path, 'utf8')).replace(/original$/, 'edited'))
+  const changed = (await get('production?id=' + id)).item
+  assert.equal(changed.body, 'edited')
+  assert.equal(changed.content.revision, item.content.revision + 1)
+  assert.deepEqual((await store.read()).items.find(row => row.id === id).content, changed.content)
+})
