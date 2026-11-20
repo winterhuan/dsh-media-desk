@@ -295,7 +295,7 @@ async function route(ctx, store, desk, req, res) {
       return json(res, 200, { association: await desk.nativeSessions.newConversation(body.workId ?? null), state: await store.read() })
     }
     case 'produce': {
-      const started = await desk.producer.start(String(body.id))
+      const started = await desk.producer.start(String(body.id), { format: body.format, withImages: body.withImages })
       return json(res, 200, { started, state: await store.read() })
     }
     case 'produce/cancel':

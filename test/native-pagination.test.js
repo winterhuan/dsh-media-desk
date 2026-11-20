@@ -35,7 +35,8 @@ test('真实原生读取按完整 JSON 分页，微小和精确限额及大集�
   assert.equal((await runtime.host('notes/migrate', {})).status, 200)
   const association = (await runtime.host('sessions/open', { workId: null })).value.association
   const requestId = await runtime.prompt(association.sessionId, 'Read-only MD_FIXTURE_PAGED_READ: read complete collections and metadata through bounded pages.')
-  const turn = await runtime.turn(association.sessionId, requestId)
+  // The paged-read turn uses two minutes of the case budget; setup and teardown retain the remainder.
+  const turn = await runtime.turn(association.sessionId, requestId, 120000)
   assert.equal(turn.end.data.reason.kind, 'completed')
   const seen = new Set()
   // The result pruner can rewrite the same toolCallId; pagination uses the original persisted result.

@@ -67,7 +67,7 @@ function Plate({ asset, paper = false, mark = null, alt = '', onOpen, onRetry })
 /** 进度：放在对话栏里，像助手在汇报。 */
 function ProgressCard({ production, live, settings }) {
   const running = production.status === 'running'
-  const ready = settings?.imageReady
+  const ready = settings?.imageReady && production.withImages !== false
   const words = textLength(production.article || '')
   const visuals = [production.cover, ...(production.images ?? [])].filter(Boolean)
   const shots = production.shots ?? []
@@ -76,7 +76,7 @@ function ProgressCard({ production, live, settings }) {
   const waiting = live?.pendingInput?.length > 0
   const steps = [
     { label: t('标题和封面字'), done: planned, active: !planned },
-    { label: production.article ? t('脚本 {n} 字', { n: words, s: plural(words, '', 's') }) : t('脚本'), done: Boolean(production.article), active: planned && !production.article },
+    { label: production.article ? t('{n} 字', { n: words, s: plural(words, '', 's') }) : t(production.format === 'article' ? '文章' : '脚本'), done: Boolean(production.article), active: planned && !production.article },
     ...(ready ? [
       { label: t('封面和配图 {done}/{total}', { done: count(visuals), total: visuals.length || 1 + (settings?.imageCount ?? 2) }), done: planned && visuals.length > 0 && !visuals.some(isBusy), active: visuals.some(isBusy) },
       { label: t('分镜 {done}/{total}', { done: count(shots), total: shots.length || settings?.shotCount || 6 }), done: planned && shots.length > 0 && !shots.some(isBusy), active: shots.some(isBusy) },
@@ -97,7 +97,7 @@ function ProgressCard({ production, live, settings }) {
 }
 
 /** 对话栏顶部：这条灵感，以及唯一的入口。 */
-function IdeaCard({ item, live, settings }) {
+function IdeaCard({ item, live, settings, choices, onChoices }) {
   const production = item.production
   const running = production?.status === 'running'
   const styles = useDesk(s => s.state.styles ?? [])
@@ -106,6 +106,20 @@ function IdeaCard({ item, live, settings }) {
     <div className="md-idea-card">
       <span className="md-idea-label">{t('灵感')} · {fmtDate(item.createdAt)}</span>
       <AutoText key={item.id} className="md-idea-text" label={t('灵感')} value={item.title} content={item.content} disabled={running || item.content && item.content.status !== 'ready'} onCommit={(title, version) => dispatchOps([{ op: 'update_item', id: item.id, title }], { label: t('修改灵感'), silent: true, expectedContent: version ? { [item.id]: version } : {} })} />
+      {!running ? <>
+        <label className="md-style-pick">
+          <span>{t('体裁')}</span>
+          <select aria-label={t('体裁')} value={choices.format} onChange={e => onChoices({ format: e.target.value })}>
+            <option value="script">{t('脚本')}</option>
+            <option value="article">{t('文章')}</option>
+          </select>
+        </label>
+        <label className="md-image-choice">
+          <input type="checkbox" checked={choices.withImages} onChange={e => onChoices({ withImages: e.target.checked })} />
+          <span>{t('生成图片')}</span>
+        </label>
+        {production && (production.format ?? 'script') !== choices.format ? <p className="md-idea-hint">{t('新体裁在重新成稿后生效')}</p> : null}
+      </> : null}
       {!running ? (
         <label className="md-style-pick">
           <span>{t('风格')}</span>
@@ -116,7 +130,7 @@ function IdeaCard({ item, live, settings }) {
           </select>
         </label>
       ) : null}
-      {!production || !['running', 'done'].includes(production.status) ? <button type="button" className="md-go" onClick={() => runProduce(item.id)}>{t('一键成稿')}</button> : null}
+      {!production || !['running', 'done'].includes(production.status) ? <button type="button" className="md-go" onClick={() => runProduce(item.id, choices)}>{t('一键成稿')}</button> : null}
       {running ? <ProgressCard production={{ ...production, id: item.id }} live={live} settings={settings} /> : null}
       {production?.status === 'failed' ? <p className="md-idea-hint is-error">{production.error}</p> : null}
       {!running && !settings?.imageReady ? <p className="md-idea-hint">{t('接入生图模型后，封面和分镜也会画好。')}<button type="button" onClick={() => setDesk({ settingsOpen: true })}>{t('去接入')}</button></p> : null}
@@ -144,7 +158,7 @@ function Stat({ icon, value, unit }) {
 }
 
 /** 主视觉：渐变底、大标题、数字，右边是视频封面和配图的拼贴。 */
-function HeroTile({ item, onView }) {
+function HeroTile({ item, onView, choices }) {
   const settings = useDesk(s => s.settings)
   const production = item.production
   const running = production?.status === 'running'
@@ -160,7 +174,7 @@ function HeroTile({ item, onView }) {
   const [saving, setSaving] = React.useState(false)
   const copy = async () => {
     await navigator.clipboard.writeText(`# ${item.title || production.title}\n\n${article}`)
-    toast(t('脚本已复制'))
+    toast(t('正文已复制'))
   }
   const save = async () => {
     setSaving(true)
@@ -172,7 +186,7 @@ function HeroTile({ item, onView }) {
       title: t('重新成稿'),
       submitLabel: t('重新生成'),
       fields: [{ name: 'note', label: t('现在的文章、封面和分镜会被替换，也会再消耗一次模型额度。'), type: 'hidden' }],
-      onSubmit: () => runProduce(item.id),
+      onSubmit: () => runProduce(item.id, choices),
     },
   })
   const figures = images.length ? images : [null, null].slice(0, settings?.imageCount ?? 2)
@@ -188,7 +202,7 @@ function HeroTile({ item, onView }) {
         </div>
         {done ? (
           <div className="md-hero-actions">
-            <button type="button" className="md-pill is-primary" onClick={copy} disabled={typeof article !== 'string'}><Icon name="copy" size={14} />{t('复制脚本')}</button>
+            <button type="button" className="md-pill is-primary" onClick={copy} disabled={typeof article !== 'string'}><Icon name="copy" size={14} />{t('复制正文')}</button>
             <button type="button" className="md-pill" onClick={save} disabled={saving}><Icon name="save" size={14} />{saving ? t('保存中…') : t('保存')}</button>
             <button type="button" className="md-pill" onClick={() => downloadCover({ src: production.cover?.src, text: production.coverText || production.title }, production.title).catch(err => toast(err.message, { error: true }))}><Icon name="image" size={14} />{t('下载封面')}</button>
             <label className="md-pill md-date-pill">
@@ -473,7 +487,7 @@ function Viewer({ item, target, onChange, onClose }) {
   )
 }
 
-function Sheet({ item }) {
+function Sheet({ item, choices }) {
   const settings = useDesk(s => s.settings)
   const [open, setOpen] = React.useState(null)
   const [viewing, setViewing] = React.useState(null)
@@ -536,7 +550,7 @@ function Sheet({ item }) {
   return (
     <div className="md-sheet">
       <div className={`md-bento ${open ? 'has-open' : ''}`} ref={bento}>
-        <HeroTile item={item} onView={setViewing} />
+        <HeroTile item={item} onView={setViewing} choices={choices} />
         <section {...tile('article')}>
           <ArticleTile item={item} open={open === 'article'} onToggle={() => toggle('article')} onView={setViewing} tileRef={articleRef} />
         </section>
@@ -566,6 +580,9 @@ export function Studio({ openSession, retainSession, SessionProvider, renderSlot
   const chatOpen = useDesk(s => s.studioDock)
   const ref = React.useRef(null)
   const production = item?.production
+  const [selected, setSelected] = React.useState(null)
+  const choices = selected?.workId === id ? selected : { format: production?.format ?? 'script', withImages: production?.withImages ?? settings?.generateImages !== false }
+  const choose = patch => setSelected({ ...choices, ...patch, workId: id })
   const running = production?.status === 'running'
   const watching = running || [production?.cover, ...(production?.images ?? []), ...(production?.shots ?? [])].some(isBusy)
 
@@ -616,14 +633,14 @@ export function Studio({ openSession, retainSession, SessionProvider, renderSlot
               <NativeSessionButton workId={item.id} openSession={openSession} />
             </>
           )}
-          top={<IdeaCard item={item} live={live} settings={settings} />}
+          top={<IdeaCard item={item} live={live} settings={settings} choices={choices} onChoices={choose} />}
           suggestions={['done', 'partial', 'interrupted'].includes(production?.status) ? DONE_SUGGESTIONS.map(row => t(row)) : []}
           placeholder={running ? t('正在成稿，马上就好') : ['done', 'partial', 'interrupted'].includes(production?.status) ? t('想怎么改，直接说') : t('补充点想法，或者直接说要什么')}
           intro={false}
         />
       </div>
       <button type="button" className="md-chat-toggle" aria-label={t('打开对话')} onClick={() => setDesk(s => ({ studioDock: !s.studioDock }))}><Icon name="chat" size={16} /></button>
-      <Sheet key={item.id} item={item} />
+      <Sheet key={item.id} item={item} choices={choices} />
     </div>
   )
 }

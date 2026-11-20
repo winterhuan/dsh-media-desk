@@ -101,6 +101,8 @@ test('原生成稿先接受策划，再接受脚本；无图模式不使用模�
   const state = await waitState(runtime, state => state.items.find(row => row.id === 'seed_2')?.production?.status === 'done')
   const work = state.items.find(row => row.id === 'seed_2')
   assert.equal(work.production.article, '## Evidence\n\nA dated native result.')
+  assert.equal(work.production.format, 'script')
+  assert.equal(work.production.withImages, true)
   const stages = state.nativeRequests.filter(row => row.workId === work.id)
   assert.deepEqual(stages.map(row => row.kind), ['plan', 'article'])
   assert.ok(stages.every(row => row.status === 'accepted' && state.receipts.some(receipt => receipt.resultKey === 'stage:' + row.id) && row.endSeq >= row.startSeq))
@@ -109,6 +111,86 @@ test('原生成稿先接受策划，再接受脚本；无图模式不使用模�
     const events = await runtime.events(stage.sessionId)
     assert.ok(events.some(event => event.type === 'turn/end' && event.data.turn === stage.turn && event.data.reason.kind === 'completed'))
   }
+})
+
+test('原生工具选择文章与仅文字后固定选项，不自动生图，重启后仍可单张补画', { timeout: 180000 }, async t => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lWQAAAAASUVORK5CYII=', 'base64')
+  let calls = 0
+  const server = createServer(async (request, response) => {
+    for await (const chunk of request) { /* Consume the complete image request before replying. */ }
+    calls++
+    response.setHeader('content-type', 'application/json')
+    response.end(JSON.stringify({ data: [{ b64_json: png.toString('base64') }] }))
+  })
+  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const plan = { title: 'An article without automatic images', coverText: 'Evidence', facts: [], outline: [], cover: 'Plain paper', characters: '',
+    images: [{ caption: 'Paper', anchor: 'Evidence', prompt: 'Paper on a desk' }],
+    shots: [{ shot: 'Medium', visual: 'Paper', voice: 'Dated evidence.', seconds: 4, prompt: 'Paper storyboard' }], sources: [] }
+  const article = '## Evidence\n\nA complete article paragraph with dated evidence.'
+  const recipes = {
+    MD_FIXTURE_OPTIONS: { calls: [{ name: 'media_desk_produce', arguments: { action: 'start', id: 'seed_2', format: 'article', withImages: false } }], reply: 'Article production admitted.' },
+    MD_STAGE_plan: { calls: [read, { name: 'media_desk_submit_result', arguments: { stageId: '$stageId', result: JSON.stringify(plan) } }], reply: 'Plan submitted.' },
+    MD_STAGE_article: { calls: [read, { name: 'media_desk_submit_result', arguments: { stageId: '$stageId', result: JSON.stringify({ article, sources: [] }) } }], reply: 'Article submitted.' },
+  }
+  const runtime = await nativeRuntime(t, { recipes })
+  const barrier = { at: 0, enteredPath: join(runtime.root, 'plan-entered'), releasePath: join(runtime.root, 'plan-release'), abortedPath: join(runtime.root, 'plan-aborted'), settledPath: join(runtime.root, 'plan-settled') }
+  recipes.MD_STAGE_plan.barrier = barrier
+  await runtime.start()
+  await runtime.host('notes/migrate', {})
+  const settings = { imageCount: 1, shotCount: 1, generateImages: true,
+    image: { baseUrl: 'http://127.0.0.1:' + server.address().port, model: 'fixture-image', apiKey: 'options-private-key' } }
+  assert.equal((await runtime.host('settings', settings)).status, 200)
+  for (const options of [{ format: 'other' }, { withImages: 'false' }]) assert.equal((await runtime.host('produce', { id: 'seed_2', ...options })).status, 400)
+  assert.equal((await runtime.host('settings', { generateImages: 'false' })).status, 400)
+  const association = (await runtime.host('sessions/open', { workId: 'seed_2' })).value.association
+  const input = await runtime.prompt(association.sessionId, 'MD_FIXTURE_OPTIONS: write an article and skip automatic images.')
+  await runtime.turn(association.sessionId, input)
+  const admitted = await waitState(runtime, state => state.nativeRequests?.some(row => row.kind === 'plan' && row.status === 'running'))
+  const stage = admitted.nativeRequests.find(row => row.kind === 'plan')
+  assert.equal(stage.data.format, 'article')
+  assert.equal(stage.data.withImages, false)
+  assert.equal(stage.data.settings.imageReady, true)
+  assert.match(stage.instructions, /article written in natural paragraphs/)
+  await runtime.host('settings', { generateImages: false, imageCount: 0, shotCount: 0 })
+  assert.equal((await runtime.host('produce', { id: 'seed_2', format: 'script', withImages: true })).value.started, false)
+  await writeFile(barrier.releasePath, 'release\n')
+  const completed = await waitState(runtime, state => state.items.find(row => row.id === 'seed_2')?.production?.status === 'done')
+  const work = completed.items.find(row => row.id === 'seed_2')
+  assert.equal(work.production.format, 'article')
+  assert.equal(work.production.withImages, false)
+  assert.equal(work.production.article, article)
+  assert.deepEqual([work.production.cover, ...work.production.images, ...work.production.shots].map(row => row.status), ['skipped', 'skipped', 'skipped'])
+  assert.equal(calls, 0, 'A settled text-only attempt must not call the configured image service')
+  const stages = completed.nativeRequests.filter(row => row.workId === work.id)
+  assert.equal(stages.length, 2)
+  assert.equal(stages[1].data.format, 'article')
+  assert.match(stages[1].instructions, /Markdown article in natural paragraphs/)
+  assert.deepEqual(stages[0].data.settings, { imageCount: 1, shotCount: 1, imageReady: true })
+  const requests = (await readFile(runtime.telemetryPath, 'utf8')).trim().split('\n').map(JSON.parse)
+  for (const marker of ['MD_STAGE_plan', 'MD_STAGE_article']) {
+    const observed = requests.find(row => row.marker === marker && row.recipeIndex === 1)
+    const context = JSON.stringify(observed.context)
+    assert.match(context, /natural paragraphs/)
+    assert.match(context, /withImages/)
+    assert.doesNotMatch(context, /options-private-key/)
+  }
+  assert.match(await readFile(join(work.content.notesRoot, work.content.relativePath), 'utf8'), /A complete article paragraph/)
+  await runtime.stop()
+  await runtime.start()
+  assert.equal((await runtime.host('state')).value.state.items.find(row => row.id === work.id).production.format, 'article')
+  assert.equal((await runtime.host('settings')).value.generateImages, false)
+  assert.equal((await runtime.host('produce/regen', { id: work.id, target: 'image:0' })).status, 200)
+  const redrawn = await waitState(runtime, state => state.items.find(row => row.id === work.id)?.production?.images[0]?.status === 'done')
+  assert.equal(calls, 1)
+  const image = redrawn.items.find(row => row.id === work.id).production.images[0]
+  assert.deepEqual(await readFile(join(image.media.notesRoot, image.media.relativePath)), png)
+  await runtime.host('settings', { imageCount: 1, shotCount: 1 })
+  assert.equal((await runtime.host('produce', { id: 'seed_1' })).status, 200)
+  const defaults = await waitState(runtime, state => state.items.find(row => row.id === 'seed_1')?.production?.status === 'done')
+  assert.equal(defaults.items.find(row => row.id === 'seed_1').production.format, 'script')
+  assert.equal(defaults.items.find(row => row.id === 'seed_1').production.withImages, false)
+  assert.equal(calls, 1, 'New work respects the saved text-only default')
 })
 
 

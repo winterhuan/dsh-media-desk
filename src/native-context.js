@@ -36,12 +36,14 @@ export function apply(ctx) {
   register('media_desk_produce', 'Start a production attempt, redraw one image or cancel owned production. The Host retains accepted work and returns immediately after admission.', {
     action: { type: 'string', required: true, enum: ['start', 'redraw', 'cancel'] },
     id: { type: 'string', required: true, description: 'Work identity owned by this Session, or selected by the global assistant.' },
+    format: { type: 'string', enum: ['script', 'article'], description: 'For start: spoken script or prose article. Omit to reuse the previous attempt format, initially script.' },
+    withImages: { type: 'boolean', description: 'For start: false skips automatic image generation and keeps descriptions for later redraw. Omit to reuse the previous choice, initially the saved image default.' },
     target: { type: 'string', description: 'Required for redraw: cover, image:0 through image:7, or shot:0 through shot:23.' },
   }, async (args, exec) => {
     const { association, state } = await work.actor(exec, true)
     if (association.workId !== null && association.workId !== args.id) throw new Error('This Session owns another work')
     if (!state.items.some(row => row.id === args.id)) throw new Error('Work not found')
-    if (args.action === 'start') return { started: await ctx.mediaDesk.producer.start(args.id) }
+    if (args.action === 'start') return { started: await ctx.mediaDesk.producer.start(args.id, { format: args.format, withImages: args.withImages }) }
     if (args.action === 'redraw') { await ctx.mediaDesk.producer.regenerate(args.id, args.target); return { admitted: true } }
     // A tool cannot await quiescence of the Agent currently executing it.
     await ctx.mediaDesk.producer.invalidate(args.id)

@@ -180,9 +180,12 @@ export class Producer {
     }, { undoable: false, expectedContent })
   }
 
-  async start(id) {
+  /** Admit production with optional per-attempt format and image choices; active attempts retain their frozen choices. */
+  async start(id, { format, withImages } = {}) {
     if (this.closing) throw Object.assign(new Error(tr('Media Desk 正在关闭，请稍后重试')), { status: 503 })
-    const stage = await this.native.request('plan', id, 'Research the bound Wiki with llm-wiki, verify sources and prepare a production plan. Use the selected material, style, active writing rules and personal voice. Return the bounded plan described by media_desk_submit_result, with dates and evidence limits.', { producer: true })
+    if (format !== undefined && !['script', 'article'].includes(format)) throw Object.assign(new Error(tr('体裁须为脚本或文章')), { status: 400 })
+    if (withImages !== undefined && typeof withImages !== 'boolean') throw Object.assign(new Error(tr('请选择是否生成图片')), { status: 400 })
+    const stage = await this.native.request('plan', id, 'Research the bound Wiki with llm-wiki, verify sources and prepare a production plan. Use the selected material, style, active writing rules and personal voice. Return the bounded plan described by media_desk_submit_result, with dates and evidence limits.', { producer: true, data: { format, withImages } })
     return !stage.reused
   }
 
@@ -225,9 +228,10 @@ export class Producer {
     if (!item) throw Object.assign(new Error('Work no longer exists'), { status: 409 })
     const plan = normalizePlan(stage.candidate, stage.data.settings, item.title)
     item.title = plan.title
-    const initial = stage.data.settings.imageReady ? 'pending' : 'skipped'
+    const initial = stage.data.withImages !== false && stage.data.settings.imageReady ? 'pending' : 'skipped'
     item.production = { ...(item.production ?? {}), status: 'running', stage: 'making', startedAt: stage.createdAt,
       attemptId: stage.id, planStageId: stage.id, title: plan.title, coverText: plan.coverText, facts: plan.facts, outline: plan.outline,
+      format: stage.data.format ?? 'script', withImages: stage.data.withImages !== false,
       characters: plan.characters, sources: stage.candidate.sources ?? [], current: false,
       cover: { prompt: plan.cover, status: initial }, images: plan.images.map(row => ({ ...row, status: initial })),
       shots: plan.shots.map(row => ({ ...row, status: initial })), preferenceVersions: stage.data.preferenceVersions,
@@ -255,16 +259,18 @@ export class Producer {
         return true
       })
       if (!owned) return
+      const format = stage.data.format ?? 'script'
       await this.native.request('article', stage.workId,
-        'Write the complete Markdown script based on the accepted plan, facts and sources. Use llm-wiki to check relevant evidence. Submit article and dated sources through media_desk_submit_result.',
-        { data: { planId: stage.id, preferenceVersions: stage.data.preferenceVersions, materialVersion: stage.data.materialVersion, language: stage.data.language } })
+        (format === 'article' ? 'Write a complete Markdown article in natural paragraphs' : 'Write a complete Markdown spoken script with one sentence per line')
+          + ' based on the accepted plan, facts and sources. Use llm-wiki to check relevant evidence. Submit article and dated sources through media_desk_submit_result.',
+        { data: { planId: stage.id, format, withImages: stage.data.withImages !== false, preferenceVersions: stage.data.preferenceVersions, materialVersion: stage.data.materialVersion, language: stage.data.language } })
       const current = await this.store.read()
       const latest = current.items.find(row => row.id === stage.workId)?.production
       if (this.jobs.get(stage.workId) !== job || job.controller.signal.aborted || latest?.attemptId !== stage.id || latest.status !== 'running') {
         if (this.jobs.get(stage.workId) === job) this.jobs.delete(stage.workId)
         return
       }
-      if (this.ready(settings)) {
+      if (stage.data.withImages !== false && this.ready(settings)) {
         const targets = ['cover', ...latest.images.map((_, i) => 'image:' + i), ...latest.shots.map((_, i) => 'shot:' + i)]
         let next = 0
         const worker = async () => {

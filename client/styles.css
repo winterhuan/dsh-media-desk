@@ -624,6 +624,8 @@ button.md-stamp:not(:disabled):hover { transform: scale(1.08) rotate(-2deg); }
 .md-date-pill input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: 0; padding: 0; }
 .md-root .md-pill.is-small { height: 28px; padding: 0 11px; font-size: 12px; }
 .md-style-pick { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: .5px solid var(--line); color: var(--ink3); font-size: 12px; line-height: 18px; }
+.md-image-choice { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--ink); font-size: 12px; line-height: 18px; }
+.md-image-choice input { flex: none; margin: 0; accent-color: var(--accent); }
 .md-root .md-style-pick select { flex: 1; min-width: 0; height: 28px; padding: 0 6px; border: 0; border-radius: var(--r-sm); background: var(--hover); color: var(--ink); font-size: 12.5px; outline: 0; }
 
 /* 精致页面的共同底：和工作区一样的底色 + 格子 */

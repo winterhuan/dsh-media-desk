@@ -1,5 +1,7 @@
 // Host 英文词典：key 是中文原文，{name} 是占位符。
 export const EN = {
+  '体裁须为脚本或文章': 'Choose script or article as the format',
+  '请选择是否生成图片': 'Choose whether to generate images',
   "当前策划的脚本尚未接受，请等待完成后保存": "The current plan has no accepted script yet. Wait for it to finish before saving.",
   "已接受的数据在保存准备期间变化，请重新读取": "The accepted Store changed during save preparation",
   "保存身份无效，请重新提交编辑": "Invalid save identity",

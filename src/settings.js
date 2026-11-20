@@ -10,6 +10,7 @@ const DEFAULTS = {
   assistant: { provider: '', model: '' },
   voice: '',
   exportDir: '',
+  generateImages: true,
   imageCount: 2,
   shotCount: 6,
   language: 'auto',
@@ -106,6 +107,10 @@ export class Settings {
       else next.voice = voice
     }
     if (typeof patch.exportDir === 'string') next.exportDir = patch.exportDir.trim().slice(0, 500)
+    if (patch.generateImages !== undefined) {
+      if (typeof patch.generateImages !== 'boolean') throw Object.assign(new Error(tr('请选择是否生成图片')), { status: 400 })
+      next.generateImages = patch.generateImages
+    }
     if (patch.imageCount !== undefined) next.imageCount = clamp(patch.imageCount, 0, 4, current.imageCount)
     if (['auto', 'zh', 'en'].includes(patch.language)) next.language = patch.language
     if (patch.shotCount !== undefined) next.shotCount = clamp(patch.shotCount, 0, 12, current.shotCount)

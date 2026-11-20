@@ -1,5 +1,10 @@
 // 英文词典（studio）。key 是中文原文，value 是英文。
 export const STUDIO = {
+  '体裁': 'Format',
+  '文章': 'Article',
+  '生成图片': 'Generate images',
+  '成稿时默认生成图片': 'Generate images by default',
+  '新体裁在重新成稿后生效': 'Regenerate to apply the new format',
   '请在对话中批准或拒绝操作': 'Approve or reject the operation in the conversation',
   '请在对话中回答问题': 'Answer the question in the conversation',
   '恢复保存与迁移': 'Recover saves and migrate',

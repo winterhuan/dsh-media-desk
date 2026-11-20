@@ -243,7 +243,7 @@ export class NativeWork {
     if (!stage) return null
     return { id: stage.id, kind: stage.kind, workId: stage.workId, status: stage.status,
       expectedContent: stage.expectedContent, instructions: stage.instructions,
-      settings: stage.data.settings, preferenceVersions: stage.data.preferenceVersions,
+      settings: stage.data.settings, format: stage.data.format, withImages: stage.data.withImages, preferenceVersions: stage.data.preferenceVersions,
       selectedMaterial: stage.data.sampleMaterial, planId: stage.data.planId, language: stage.data.language, materialVersion: stage.data.materialVersion }
   }
 
@@ -391,23 +391,28 @@ export class NativeWork {
       const request = { id: randomUUID(), requestId: randomUUID(), kind, workId, producer: Boolean(producer), status: 'pending',
         expectedContent: work?.content ? { [workId]: structuredClone(work.content) } : {},
         createdAt: new Date().toISOString(), instructions, data }
-      request.inputTextHash = hash([{ type: 'text', text: stageText(request) }])
       if (producer) {
         const settings = await this.ctx.mediaDesk.settings.read()
         await writeFileAtomic(join(this.store.root, 'native-settings', request.id + '.json'), JSON.stringify(settings), { mode: 0o600, dirMode: 0o700 })
         request.data.language = work?.content?.language ?? work?.lang ?? 'zh'
         request.data.materialVersion = work?.content?.snapshot ?? null
         request.data.settings = { imageCount: settings.imageCount, shotCount: settings.shotCount, imageReady: this.ctx.mediaDesk.producer.ready(settings) }
+        request.data.format = data.format ?? work.production?.format ?? 'script'
+        request.data.withImages = data.withImages ?? work.production?.withImages ?? settings.generateImages !== false
+        request.instructions += request.data.format === 'article'
+          ? ' Plan an article written in natural paragraphs.' : ' Plan a spoken script with one sentence per line.'
         const selectedStyle = state.styles?.find(row => row.id === state.activeStyleId)
         request.data.preferenceVersions = { voice: state.voice?.content?.snapshot ?? state.voice?.content,
           style: selectedStyle?.content?.snapshot ?? selectedStyle?.content ?? (selectedStyle?.preset ? { presetId: selectedStyle.id } : null),
           rules: state.skills.filter(row => !row.sample && ['active', 'exported'].includes(row.status)).map(row => row.content?.snapshot ?? row.content) }
       }
+      request.inputTextHash = hash([{ type: 'text', text: stageText(request) }])
       await this.store.mutate('受理原生任务', draft => {
         (draft.nativeRequests ??= []).push(request)
         if (producer) {
           const target = draft.items.find(row => row.id === workId)
-          target.production = { ...(target.production ?? {}), status: 'running', stage: 'brief', attemptId: request.id, preferenceVersions: request.data.preferenceVersions }
+          target.production = { ...(target.production ?? {}), status: 'running', stage: 'brief', attemptId: request.id,
+            format: request.data.format, withImages: request.data.withImages, preferenceVersions: request.data.preferenceVersions }
         }
       }, { undoable: false })
       return { request, reused: false }

@@ -186,9 +186,9 @@ export function closeItem() {
 }
 
 /** 一键成稿。任务在 Host 里跑，这里只负责启动和看进度。 */
-export async function runProduce(id) {
+export async function runProduce(id, { format, withImages } = {}) {
   try {
-    const data = await request('produce', { id })
+    const data = await request('produce', { id, format, withImages })
     setDesk({ state: data.state })
   } catch (err) {
     report(err)
