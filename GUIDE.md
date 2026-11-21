@@ -32,7 +32,7 @@ Choose the text model in the native conversation. A model change reaches the nex
 
 Native **Stop** stops the current turn and retains pending input; already admitted images can settle. **Cancel production** stops the whole attempt and its images. Queue edits, removal and steering invalidate changed stage input. You can send again after Stop. **Start a new conversation** first stops active owned work, then binds a fresh Session; the old history, old pending inputs and accepted content remain.
 
-Select a passage in the body and choose **Ask the assistant to edit this**. It enters the native draft with its selected content version. If Notes changes before the edit is accepted, select again from the latest body. Missing, invalid or conflicting Notes files block writes while preserving the editor draft and accepted content.
+Select a passage in the body and choose **Ask the assistant to edit this**. It enters the native draft with its selected content version. The Agent rereads the registered Notes file, edits it with native file tools and runs `media_desk_validate`; repair any reported format errors in the file. The workbench picks up valid changes on refresh. Direct edits survive Stop or a failed turn and do not create a workbench undo entry. If the passage has changed, select it again from the latest body. Workbench saves and structured stages retain their version and conflict checks.
 
 <a id="use-the-five-views"></a>
 ## Use the five views

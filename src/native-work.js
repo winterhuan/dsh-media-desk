@@ -1,7 +1,7 @@
 /** Host-owned native stage binding and candidate acceptance for registered creative objects. */
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { applyOps } from './ops.js'
 import { normalizeStyle } from './style.js'
@@ -11,7 +11,7 @@ import { tr } from './i18n.js'
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const failure = (code, message, status = 409) => Object.assign(new Error(message), { code, status })
 const active = row => ['pending', 'running', 'waiting', 'candidate', 'save-failed'].includes(row.status)
-const stageText = row => `Media Desk stage ${row.id} (${row.kind}).\n${row.instructions}\nRead media_desk_read for the stage and current Notes version. Submit the structured candidate using media_desk_submit_result, then finish this turn. Do not poll acceptance within this turn: the Host accepts a candidate only after the native turn succeeds. Do not write registered creative files through filesystem or Shell tools.`
+const stageText = row => `Media Desk stage ${row.id} (${row.kind}).\n${row.instructions}\nRead media_desk_read for the stage and current Notes version. Submit the structured candidate using media_desk_submit_result, then finish this turn. Do not poll acceptance within this turn: the Host accepts a candidate only after the native turn succeeds. For this structured stage, submit a candidate without editing its current Notes file.`
 const readonly = messages => messages.some(message => message.source?.kind === 'user'
   && /\bread[ -]only\b|只读|禁止写入|不要(?:保存|写入|修改)/i.test(message.content.filter(block => block.type === 'text').map(block => block.text).join('\n')))
 
@@ -245,6 +245,34 @@ export class NativeWork {
       expectedContent: stage.expectedContent, instructions: stage.instructions,
       settings: stage.data.settings, format: stage.data.format, withImages: stage.data.withImages, preferenceVersions: stage.data.preferenceVersions,
       selectedMaterial: stage.data.sampleMaterial, planId: stage.data.planId, language: stage.data.language, materialVersion: stage.data.materialVersion }
+  }
+
+  /** Validate registered file bytes without invoking Store hydration or publishing a save. */
+  async validate(exec, { file_path }) {
+    exec.signal.throwIfAborted()
+    const association = this.sessions.requireAssociation(exec.agent)
+    if (typeof file_path !== 'string' || !isAbsolute(file_path)) throw failure('native/file-path', 'Provide an absolute registered Notes path', 400)
+    // Store reads adopt external edits and write history; validation must remain read-only.
+    const state = JSON.parse(await readFile(this.store.file, 'utf8'))
+    const files = []
+    const add = (reference, id, kind) => { if (reference) files.push({ reference, id, kind }) }
+    for (const item of state.items) if (association.workId === null || association.workId === item.id) {
+      add(item.content, item.id, 'work')
+      add(item.materialContent, item.id, 'material')
+    }
+    if (association.workId === null) {
+      for (const row of state.styles) if (!row.preset && !row.sample) {
+        add(row.content, row.id, 'style')
+        add(row.sampleContent, row.id + '-samples', 'material')
+      }
+      for (const row of state.skills) if (!row.sample) add(row.content, row.id, 'rule')
+      add(state.voice?.content, 'personal-voice', 'voice')
+    }
+    const file = files.find(({ reference }) => join(reference.notesRoot, reference.relativePath) === resolve(file_path))
+    if (!file) throw failure('native/file-unregistered', 'This Session has no editable registered file at this path. Read media_desk_read for its current content reference.', 403)
+    const result = await this.store.notes.validate(file.reference, file.id, file.kind)
+    exec.signal.throwIfAborted()
+    return { file_path: resolve(file_path), id: file.id, kind: file.kind, ...result }
   }
 
   /** Apply current, owned edits; changed media prompts invalidate old renders and return targets for explicit redraw. */

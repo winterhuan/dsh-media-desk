@@ -27,7 +27,7 @@ kind: "package-bundle"
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.11
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.12
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
@@ -46,6 +46,8 @@ dsh --profile media-desk-dev --port 0 --no-open
 ### Notes 作品文件
 
 新作品使用 `notes/works/<标题>.md`，重名时加短身份编号。语言保存在文件元数据中，未知语言记为 `und`。「正文」格子直接读取和编辑已登记的 Markdown，尚未成稿时也可使用。点击「直接修改」，再点击「保存」；格子显示相对文件位置和内容版本。保存草稿或接受成稿文字时，选择其作为同一份当前正文。非当前草稿与固定 AI 原稿使用隐藏的 `notes/.media-desk/history/<work-id>/` 目录。近期历史与撤销各保留五条；当前草稿、仍被引用的原稿、活动候选和编辑器冲突证据继续保留。相同的冻结快照复用文件，发布副本在接受后清理。
+
+日常改稿由 Agent 先读取已登记文件，再用原生 `edit` 或 `write` 直接修改。`media_desk_validate` 只检查已保存文件的格式和登记身份，不修改文字、快照、索引、Store 或回执。下次工作台读取时导入有效文件变更并更新版本、历史和导航。直接编辑立即生效，停止或失败的轮次不会回滚文件，也不生成业务保存回执或工作台撤销条目。YAML 无效时须在文件中修复；结构化成稿仍使用阶段候选。
 
 收藏来源与明确选中的作者样文使用 `notes/materials/*.md`。元数据记录来源、采集日期、稳定的外部身份、材料类型，以及正文是完整来源还是摘录。导入条目作为作品使用时，收藏来源与可编辑作品正文分别保留。只有创建自定义风格时明确选中的材料提供个人文风依据。自定义风格、写作规则和个人语气分别使用 `notes/preferences/styles/*.md`、`notes/preferences/rules/*.md` 与 `notes/preferences/voice.md`。内置风格预设仍随包提供。
 
@@ -93,7 +95,7 @@ pnpm test
 
 [原生运行时 fixture](test/fixtures/native-runtime.js)安装隔离的官方 Web profile，在临时 Wiki 上运行真实的 Loader、SessionController 和工具。模型适配器仅控制外部模型响应。[技能指令记录](test/fixtures/llm-wiki.instructions.json)标识固定的 `llm-wiki` 指令文件；不包含个人 Wiki 页面。
 
-[Notes 存储测试](test/notes-storage.test.js)覆盖公开读取、编辑、登记、修复和已保存根目录绑定。[恢复](test/notes-recovery.test.js)、[撤销](test/notes-undo.test.js)和[迁移](test/notes-migration.test.js)通过公开 Host 检查保留的文件与回执。[所有权测试](test/write-ownership.test.js)使用独立进程和暂停的公开 Store 操作，检查竞争、写入排空及被终止持有者的恢复。
+[Notes 存储测试](test/notes-storage.test.js)覆盖公开读取、编辑、登记、修复和已保存根目录绑定。[直接文件测试](test/native-file-edits.test.js)检查原生 read/edit/write、格式修复、工作台刷新及校验无写入。[恢复](test/notes-recovery.test.js)、[撤销](test/notes-undo.test.js)和[迁移](test/notes-migration.test.js)通过公开 Host 检查保留的文件与回执。[所有权测试](test/write-ownership.test.js)使用独立进程和暂停的公开 Store 操作，检查竞争、写入排空及被终止持有者的恢复。
 
 <a id="understand-the-implementation"></a>
 ## 理解实现
@@ -135,7 +137,7 @@ pnpm test
 
 #### 模型看到什么
 
-`media_desk_produce` 在开始成稿时接受脚本／文章体裁和自动生图选择。Host 为本次尝试固定两项选择，并通过所属阶段返回。仅文字模式保留画面描述，供显式补画。 原生 Agent 通过[业务工具](src/native-context.js)读取有界作品、保留草稿引用、冻结写作偏好、选定材料和指标。普通编辑须满足实际 Session 归属与当前 Notes 版本；选段也保留选择时版本。`media_desk_edit` 的 `revise_production` 操作须匹配当前尝试，修改选中的 Notes 正文或有界画面描述，并返回供 `media_desk_produce` 显式重画的目标。同一结果身份与相同参数返回已保存回执；不同参数报告冲突。结构化策划、脚本、风格和规则候选须匹配已持久成功的原生轮次。Host 图片任务消费已接受策划；生图工具仅接收图片提示词，不接收文字模型凭据。 全局规则复盘先以 `kind: "work"` 且省略 `id`、传入 null 或空字符串调用 `media_desk_read` 列举作品，再使用返回的作品 ID 读取当前 Notes 和固定 AI 原稿引用。全局阶段的 `workId: null`；阶段和会话关联 ID 不代表作品。指标以 `itemId` 返回关联作品，未关联时为 null；未关联指标不能支持针对某件作品的结论。证据不足时可不提出规则；规则提案须由用户审阅。
+`media_desk_produce` 在开始成稿时接受脚本／文章体裁和自动生图选择。Host 为本次尝试固定两项选择，并通过所属阶段返回。仅文字模式保留画面描述，供显式补画。 原生 Agent 通过[业务工具](src/native-context.js)读取有界作品、保留草稿引用、冻结写作偏好、选定材料和指标。日常文件编辑使用原生文件工具与只读 `media_desk_validate` 校验。业务操作须满足实际 Session 归属与当前 Notes 版本；选段也保留选择时版本。`media_desk_edit` 的 `revise_production` 操作须匹配当前尝试，修改选中的 Notes 正文或有界画面描述，并返回供 `media_desk_produce` 显式重画的目标。同一结果身份与相同参数返回已保存回执；不同参数报告冲突。结构化策划、脚本、风格和规则候选须匹配已持久成功的原生轮次。Host 图片任务消费已接受策划；生图工具仅接收图片提示词，不接收文字模型凭据。 全局规则复盘先以 `kind: "work"` 且省略 `id`、传入 null 或空字符串调用 `media_desk_read` 列举作品，再使用返回的作品 ID 读取当前 Notes 和固定 AI 原稿引用。全局阶段的 `workId: null`；阶段和会话关联 ID 不代表作品。指标以 `itemId` 返回关联作品，未关联时为 null；未关联指标不能支持针对某件作品的结论。证据不足时可不提出规则；规则提案须由用户审阅。
 
 #### Token 影响
 

@@ -259,6 +259,17 @@ export class Notes {
     return kind === 'work' ? this.readWork(reference, id) : this.readManaged(reference, id, kind)
   }
 
+  /** Check current file bytes without publishing content, snapshots, references or receipts. */
+  async validate(reference, id, kind) {
+    try {
+      const { sha256 } = await this.readPrimary(reference, id, kind)
+      return { valid: true, sha256 }
+    } catch (error) {
+      if (!error.code?.startsWith('notes/')) throw error
+      return { valid: false, errors: [{ code: error.code, message: error.message }] }
+    }
+  }
+
   /**
    * Reuse identical frozen bytes; reject an existing snapshot changed by an external editor.
    * @param {object} reference - Snapshot location under an owned Notes root.
