@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /** npm CLI for read-only work inspection and file validation. */
 import { parseArgs } from 'node:util'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
+import { realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { DeskReader } from '../src/desk-reader.js'
@@ -36,6 +37,6 @@ export async function main(argv = process.argv.slice(2)) {
   if (action === 'validate' && !result.valid) process.exitCode = 1
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main().catch(error => { console.error(JSON.stringify({ error: error.message, code: error.code })); process.exitCode = 1 })
 }

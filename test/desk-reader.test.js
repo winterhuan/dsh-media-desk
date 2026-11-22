@@ -12,6 +12,22 @@ import { DeskReader } from '../src/desk-reader.js'
 const execute = promisify(execFile)
 const cli = new URL('../scripts/media-desk-read.mjs', import.meta.url).pathname
 
+test('npm 符号链接入口和 skill 包装器均执行一次只读命令', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'media-read-bin-')))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const packageLink = join(root, 'package')
+  await symlink(new URL('../', import.meta.url).pathname, packageLink, 'dir')
+  const bin = join(root, 'media-desk')
+  await symlink(join(packageLink, 'scripts/media-desk-read.mjs'), bin)
+  const env = { ...process.env, DSH_HOME: join(root, 'home'), WIKI_PATH: join(root, 'wiki') }
+  for (const entry of [bin, join(packageLink, 'scripts/media-desk-read.mjs'), join(packageLink, 'skills/media-desk/scripts/media-desk.mjs')]) {
+    const result = await execute(process.execPath, [entry, 'read'], { env })
+    assert.deepEqual(JSON.parse(result.stdout), { works: [] })
+    assert.equal(result.stderr, '')
+  }
+  await assert.rejects(readFile(join(root, 'home/media-desk/state.json')), { code: 'ENOENT' })
+})
+
 async function inventory(root) {
   const entries = []
   for (const row of await readdir(root, { withFileTypes: true })) {
