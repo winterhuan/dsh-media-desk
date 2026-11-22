@@ -5,6 +5,7 @@ import { tr } from './i18n.js'
 import { coverPrompt, figurePrompt, shotPrompt } from './images.js'
 import { newId } from './ops.js'
 import { imageReady } from './settings.js'
+import { stageInstructions } from './skill-driver.js'
 
 const CONCURRENCY = 3
 const RETRY_WAIT_MS = [6000, 14000]
@@ -185,7 +186,7 @@ export class Producer {
     if (this.closing) throw Object.assign(new Error(tr('Media Desk 正在关闭，请稍后重试')), { status: 503 })
     if (format !== undefined && !['script', 'article'].includes(format)) throw Object.assign(new Error(tr('体裁须为脚本或文章')), { status: 400 })
     if (withImages !== undefined && typeof withImages !== 'boolean') throw Object.assign(new Error(tr('请选择是否生成图片')), { status: 400 })
-    const stage = await this.native.request('plan', id, 'Research the bound Wiki with llm-wiki, verify sources and prepare a production plan. Use the selected material, style, active writing rules and personal voice. Return the bounded plan described by media_desk_submit_result, with dates and evidence limits.', { producer: true, data: { format, withImages } })
+    const stage = await this.native.request('plan', id, stageInstructions('plan'), { producer: true, data: { format, withImages } })
     return !stage.reused
   }
 
@@ -236,6 +237,7 @@ export class Producer {
       cover: { prompt: plan.cover, status: initial }, images: plan.images.map(row => ({ ...row, status: initial })),
       shots: plan.shots.map(row => ({ ...row, status: initial })), preferenceVersions: stage.data.preferenceVersions,
       requestedModel: stage.requestedModel, actualModels: stage.actualModels }
+    delete item.production.skillResultId
   }
 
   async nativeAccepted(stage) {
@@ -261,8 +263,7 @@ export class Producer {
       if (!owned) return
       const format = stage.data.format ?? 'script'
       await this.native.request('article', stage.workId,
-        (format === 'article' ? 'Write a complete Markdown article in natural paragraphs' : 'Write a complete Markdown spoken script with one sentence per line')
-          + ' based on the accepted plan, facts and sources. Use llm-wiki to check relevant evidence. Submit article and dated sources through media_desk_submit_result.',
+        stageInstructions('article') + '\nUse this accepted attempt format: ' + format + '.',
         { data: { planId: stage.id, format, withImages: stage.data.withImages !== false, preferenceVersions: stage.data.preferenceVersions, materialVersion: stage.data.materialVersion, language: stage.data.language } })
       const current = await this.store.read()
       const latest = current.items.find(row => row.id === stage.workId)?.production
@@ -317,9 +318,10 @@ export class Producer {
     const job = this.jobs.get(id)?.attemptId === expectedAttempt ? this.jobs.get(id) : null
     const completed = await this.store.mutate('成稿', draft => {
       const next = languageAt(draft.items.find(row => row.id === id), language)?.production
-      if (!next || (next.attemptId ?? null) !== (expectedAttempt ?? null) || next.nativeStageId !== production.nativeStageId) return false
+      if (!next || (next.attemptId ?? null) !== (expectedAttempt ?? null) || next.nativeStageId !== production.nativeStageId || next.skillResultId !== production.skillResultId) return false
       const article = draft.nativeRequests?.find(row => row.id === next.nativeStageId && row.kind === 'article' && row.data.planId === next.attemptId)
       const accepted = article?.status === 'accepted' && draft.receipts?.some(row => row.resultKey === 'stage:' + article.id)
+        || !next.attemptId && next.skillResultId && draft.receipts?.some(row => row.resultKey === 'skill:' + next.skillResultId)
       if (recover && (!accepted || ['cancelled', 'failed'].includes(next.status))) return false
       const pendingText = draft.nativeRequests?.some(row => row.workId === id && ['plan', 'article'].includes(row.kind)
         && (row.kind === 'plan' ? row.id : row.data.planId) === next.attemptId && ['pending', 'running', 'waiting', 'candidate', 'save-failed'].includes(row.status))

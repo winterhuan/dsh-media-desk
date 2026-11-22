@@ -8,12 +8,12 @@ import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { pipeline } from 'node:stream/promises'
 import { Service } from '@deepseek-ai/cordis'
-import { assistantModelOverride, defaultSelection, modelInfo, setAssistantModel } from './ai.js'
+import { modelInfo } from './ai.js'
 import { defaultExportDir, resolveExportDir, saveProduction } from './export.js'
 import { harvest, harvestText } from './harvest.js'
 import { generateImage } from './images.js'
 import { generateToolImage, imageTool } from './image-tool.js'
-import { computeInsights, exportSkill } from './learn.js'
+import { computeInsights, exportSkill, ruleLearningInstructions } from './learn.js'
 import { applyOps, newId } from './ops.js'
 import { Producer } from './produce.js'
 import { publicSettings, Settings, imageReady } from './settings.js'
@@ -27,13 +27,14 @@ import { MediaFiles } from './media-files.js'
 import { Notes, notesSaveMessage } from './notes.js'
 import { WriteOwner } from './write-owner.js'
 import { pruneNotesHistory } from './notes-history.js'
+import { SkillDesk } from './skill-desk.js'
 
 const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets')
 const MAX_JSON = 4_000_000
 const MAX_UPLOAD = 250_000_000
 const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' }
 const UPLOAD_EXT = Object.fromEntries(Object.entries(MIME).filter(([ext]) => ext !== '.jpeg').map(([ext, type]) => [type, ext]))
-const SERIAL_ROUTES = new Set(['ops', 'undo', 'settings', 'upload', 'produce', 'produce/regen', 'produce/save', 'skills/export', 'notes/register', 'notes/relink', 'notes/retry', 'notes/resolve', 'notes/version', 'notes/saves', 'notes/migrate', 'notes/migrations', 'notes/language', 'sessions/open', 'sessions', 'state', 'production'])
+const SERIAL_ROUTES = new Set(['ops', 'undo', 'settings', 'upload', 'produce', 'produce/regen', 'produce/save', 'skills/export', 'notes/register', 'notes/relink', 'notes/retry', 'notes/resolve', 'notes/version', 'notes/saves', 'notes/migrate', 'notes/migrations', 'notes/language', 'sessions/open', 'sessions/retry', 'sessions', 'state', 'production'])
 const editsPreferenceText = ops => (Array.isArray(ops) ? ops : []).some(op => op?.op === 'update_style'
   || op?.op === 'update_skill' && ['name', 'rule', 'source', 'evidence'].some(key => op[key] !== undefined))
 
@@ -217,20 +218,6 @@ async function route(ctx, store, desk, req, res) {
       return json(res, 200, { item, production: item?.production ?? null, status: item?.status, live: { running: desk.producer.isRunning(id), pendingInput: await desk.nativeWork.pendingInput(store.state, id) } })
     }
     if (path === 'settings') return json(res, 200, { ...publicSettings(await desk.settings.read(), Boolean(imageTool(ctx))), defaultExportDir: defaultExportDir() })
-    if (path === 'models') {
-      // 列出 Harness 里已接的提供方和它们公布的模型，给工作台的助手模型选择器用
-      const llm = ctx.get('llm')
-      const providers = llm ? await llm.listProviders() : []
-      const settled = await Promise.allSettled(providers.map(async p => ({
-        provider: p.id, name: p.name,
-        models: (await llm.listModels(p.id)).map(m => ({ id: m.id, name: m.name || m.id })),
-      })))
-      return json(res, 200, {
-        providers: settled.filter(r => r.status === 'fulfilled').map(r => r.value).filter(p => p.models.length),
-        default: defaultSelection(ctx),
-        current: assistantModelOverride(),
-      })
-    }
     if (path === 'insights') return json(res, 200, computeInsights(await store.read()))
     return json(res, 404, { error: tr('接口不存在') })
   }
@@ -243,6 +230,7 @@ async function route(ctx, store, desk, req, res) {
   if (path === 'upload') return handleUpload(req, store, res)
   const body = await readJson(req)
   switch (path) {
+    case 'skill': return json(res, 200, await desk.skillDesk.execute(body.action, body.args ?? {}))
     case 'notes/migrate': {
       const result = await store.migrateNotes(await desk.nativeSessions.list(), (await desk.settings.read()).voice)
       await desk.mediaFiles.migrate()
@@ -276,6 +264,8 @@ async function route(ctx, store, desk, req, res) {
     }
     case 'sessions/open':
       return json(res, 200, { association: await desk.nativeSessions.open(body.workId ?? null) })
+    case 'sessions/retry':
+      return json(res, 200, { association: await desk.nativeSessions.retry(body.workId ?? null) })
     case 'ops': {
       const label = typeof body.label === 'string' ? body.label : tr('操作')
       const undoable = body.undoable !== false && !editsPreferenceText(body.ops)
@@ -329,7 +319,7 @@ async function route(ctx, store, desk, req, res) {
       if (videoCover && !(videoCover[0] === 0xff && videoCover[1] === 0xd8)) return json(res, 400, { error: tr('封面不是有效的图片') })
       if (videoCover && (body.coverSrc !== production.cover?.src || body.coverText !== (production.coverText || production.title))) return json(res, 409, { error: tr('封面已变化，请重新保存') })
       const saved = await saveProduction(production, { filesDir: store.filesDir, exportDir: resolveExportDir(settings.exportDir), videoCover,
-        resolveMedia: id => desk.mediaFiles.resolve(id), snapshot: { workId: item.id, content: item.content, attemptId: production.attemptId } })
+        resolveMedia: id => desk.mediaFiles.resolve(id), snapshot: { workId: item.id, content: item.content, attemptId: production.attemptId, skillResultId: production.skillResultId } })
       const next = await store.mutate('保存成稿', (draft) => {
         const target = draft.items.find(row => row.id === body.id)
         if (target?.production) {
@@ -352,7 +342,6 @@ async function route(ctx, store, desk, req, res) {
     case 'style/extract': return jsonState(res, store, await extractStyle(ctx, store, body, desk.ownership.signal))
     case 'settings': {
       const updated = await desk.settings.update(body)
-      setAssistantModel(updated.assistant)
       return json(res, 200, { ...publicSettings(updated, Boolean(imageTool(ctx))), defaultExportDir: defaultExportDir(), assistantEffective: modelInfo(ctx)?.label ?? null })
     }
     case 'settings/test': {
@@ -367,7 +356,10 @@ async function route(ctx, store, desk, req, res) {
     }
     case 'capture-url': return jsonState(res, store, await addFromUrl(ctx, store, body, desk.ownership.signal))
     case 'skills/learn': {
-      const stage = await desk.nativeWork.request('rules', null, 'Review the registered works across the global workspace. List works first, then read relevant works and follow their current Notes and fixed AI-original references. A global stage with workId null does not mean the work list is empty. Read recorded performance metrics and their work associations. Propose evidence-based writing rules as rules[{name,rule,evidence}]. Treat correlations as observations rather than causation; proposals require user review. If the evidence is insufficient after reading the works, submit rules[] and explain the specific limitation.')
+      if (body.workId !== undefined && (typeof body.workId !== 'string' || !body.workId.trim())
+        || body.feedback !== undefined && (typeof body.feedback !== 'string' || body.feedback.length > 20000)) return json(res, 400, { error: tr('请选择作品，修改总结最多 20000 字') })
+      const stage = await desk.nativeWork.request('rules', null, ruleLearningInstructions(body.workId),
+        { data: { sourceWorkId: body.workId, expectedSourceContent: body.expectedContent, editFeedback: body.feedback ?? '' } })
       return jsonState(res, store, { stage })
     }
     case 'skills/export': {
@@ -430,7 +422,7 @@ export default class MediaDeskHost extends Service {
       },
       onError: error => ctx.logger.error(error),
     })
-    const nativeSessions = new NativeSessions(ctx, store, settings, config)
+    const nativeSessions = new NativeSessions(ctx, store, config)
     store.notes = new Notes(ownership)
     store.syncDerivedSkill = state => exportSkill(state, dirname(store.root), { existingOnly: true })
     const nativeWork = new NativeWork(ctx, store, nativeSessions)
@@ -438,6 +430,7 @@ export default class MediaDeskHost extends Service {
     const mediaFiles = new MediaFiles(store, { onError: error => ctx.logger.error(error) })
     producer.media = mediaFiles
     Object.assign(this, { store, settings, producer, nativeSessions, nativeWork, mediaFiles })
+    this.skillDesk = new SkillDesk(this)
     const desk = this
     await nativeSessions.init()
     await store.notes.init()
@@ -447,9 +440,8 @@ export default class MediaDeskHost extends Service {
     }
     await producer.settleAll()
     await nativeWork.init()
+    await settings.read()
     await store.run(async () => { try { await pruneNotesHistory(store) } catch (error) { store.onCleanupError(error) } })
-    // 启动时恢复用户在工作台里选过的助手模型
-    setAssistantModel((await settings.read()).assistant)
     ctx.inject(['shellEnv'], shellCtx => shellCtx.shellEnv.register({
       name: 'media-desk.wiki',
       variables: { DSH_MEDIA_DESK_WIKI_PATH: { description: 'Wiki root bound to this Media Desk Session; set WIKI_PATH to this value for llm-wiki commands.' } },
@@ -482,7 +474,7 @@ export default class MediaDeskHost extends Service {
             return
           }
           const message = err.pendingId ? withLang(req.headers['x-media-desk-lang'], () => notesSaveMessage(err)) : err.message
-          json(res, err.status || 500, { error: message, ...(err.code ? { code: err.code } : {}), ...(err.pendingId ? { pendingId: err.pendingId } : {}) })
+          json(res, err.status || 500, { error: message, ...(err.code ? { code: err.code } : {}), ...(err.pendingId ? { pendingId: err.pendingId } : {}), ...(typeof err.canRetry === 'boolean' ? { canRetry: err.canRetry } : {}) })
         }
       },
     }), 'dsh-media-desk: /media-desk routes')

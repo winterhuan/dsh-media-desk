@@ -1,5 +1,15 @@
 // 英文词典（pages）。key 是中文原文，value 是英文。
 export const PAGES = {
+  '部分规则文件未登记': 'Some rule files were not registered',
+  "已开始提炼，完成后在写作规则中审阅启用": "Learning started. Review and enable the proposals under Writing rules when ready.",
+  "依据与相近规则": "Evidence and related rules",
+  "适用范围：{scope}": "Scope: {scope}",
+  "依据：{evidence}": "Evidence: {evidence}",
+  "修改前：{text}": "Before: {text}",
+  "修改后：{text}": "After: {text}",
+  "相近规则：{name}": "Related rule: {name}",
+  "比较新增要求；重复的提案可删除，需要保留时再启用": "Compare the added requirement. Delete redundant proposals or enable those you want to keep.",
+
   // 订阅生图设置
   生图来源: 'Image source',
   '图片 API': 'Image API',

@@ -1,10 +1,13 @@
 {
   "name": "@winterhuan/dsh-media-desk",
-  "version": "2.7.0-winter.12",
+  "version": "2.7.0-winter.13",
   "description": "DeepSeek Harness 插件。一句话记灵感，一键成稿：口播脚本、标题、视频封面、配图和黑白线稿分镜。",
   "type": "module",
   "packageManager": "pnpm@11.7.0",
   "main": "src/host.js",
+  "bin": {
+    "media-desk": "scripts/media-desk-read.mjs"
+  },
   "exports": {
     ".": "./src/host.js",
     "./native-context": "./src/native-context.js",
@@ -91,6 +94,9 @@
     "README.zh.md",
     "GUIDE.md",
     "GUIDE.zh.md",
-    "scripts/organize-notes.mjs"
+    "scripts/organize-notes.mjs",
+    "scripts/media-desk.mjs",
+    "scripts/media-desk-read.mjs",
+    "skills"
   ]
 }

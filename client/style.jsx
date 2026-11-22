@@ -1,6 +1,7 @@
 // 风格：按博主类型分板块的预设，加上从自己账号提炼的专属风格。选哪张，就按哪张写。
 import React from 'react'
-import { dispatchOps, exportSkills, extractStyle, learnSkills, setDesk, useDesk } from './desk.js'
+import { RuleEvidence } from './rules.jsx'
+import { dispatchOps, exportSkills, extractStyle, learnSkills, loadDesk, setDesk, useDesk } from './desk.js'
 import { lang, t, useLang } from './i18n.js'
 import { Dialog, Icon, IconButton } from './ui.jsx'
 import { STYLE_CATEGORIES, hash, styleIcon } from './util.js'
@@ -103,6 +104,7 @@ export function StyleView() {
   const styles = useDesk(s => s.state.styles ?? [])
   const activeId = useDesk(s => s.state.activeStyleId)
   const skills = useDesk(s => s.state.skills)
+  const ruleFileIssues = useDesk(s => s.state.ruleFileIssues) ?? []
   const [adding, setAdding] = React.useState(null)
   const [category, setCategory] = React.useState('全部')
   const active = styles.find(row => row.id === activeId)
@@ -117,9 +119,11 @@ export function StyleView() {
       <div>
         <strong>{skill.name}</strong>
         <p>{skill.rule}</p>
+        {skill.content && skill.content.status !== 'ready' ? <p className="md-setup-note is-error" role="alert">{skill.content.error}</p> : null}
+        <RuleEvidence skill={skill} skills={skills} />
       </div>
       {skill.status === 'proposed'
-        ? <button type="button" className="md-pill is-small is-primary" onClick={() => dispatchOps([{ op: 'update_skill', id: skill.id, status: 'active' }], { label: t('启用规则「{name}」', { name: skill.name }), silent: true })}>{t('启用')}</button>
+        ? <button type="button" className="md-pill is-small is-primary" disabled={Boolean(skill.content && skill.content.status !== 'ready')} onClick={() => dispatchOps([{ op: 'update_skill', id: skill.id, status: 'active' }], { label: t('启用规则「{name}」', { name: skill.name }), silent: true })}>{t('启用')}</button>
         : <button type="button" className="md-pill is-small" onClick={() => dispatchOps([{ op: 'update_skill', id: skill.id, status: 'proposed' }], { label: t('停用规则「{name}」', { name: skill.name }), silent: true })}>{t('停用')}</button>}
       <IconButton icon="trash" label={t('删除规则「{name}」', { name: skill.name })} onClick={() => dispatchOps([{ op: 'delete_skill', id: skill.id }], { label: t('删除规则「{name}」', { name: skill.name }) })} />
     </li>
@@ -162,10 +166,15 @@ export function StyleView() {
             <h2>{t('写作规则')}</h2>
             <span className="md-tile-meta">{t('每种风格都会遵守')}</span>
             <span className="md-grow" />
+            <button type="button" className="md-pill is-small" onClick={loadDesk}>{t('刷新')}</button>
             <button type="button" className="md-pill is-small" onClick={learnSkills}><Icon name="spark" size={13} />{t('从数据中学习')}</button>
             <button type="button" className="md-pill is-small" onClick={exportSkills}><Icon name="bolt" size={13} />{t('导出为 Skill')}</button>
           </header>
           <ul>
+            {ruleFileIssues.length ? <li className="md-rule"><div><details className="md-rule-evidence">
+              <summary>{t('部分规则文件未登记')}</summary>
+              {ruleFileIssues.map(issue => <p key={issue.file}>{issue.file}<br />{issue.message}</p>)}
+            </details></div></li> : null}
             {proposed.map(rule)}
             {rules.map(rule)}
             {!proposed.length && !rules.length ? <li className="md-muted md-rule-empty">{t('在对话里说「以后标题都不要超过 20 个字」，这里就会多一条。')}</li> : null}

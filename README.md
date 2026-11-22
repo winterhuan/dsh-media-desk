@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Capture ideas, edit registered work Markdown directly in Wiki Notes, produce scripts and storyboards, and arrange a publishing calendar from a DSH sidebar workbench. Each work and the global assistant can use a persistent native DSH conversation with the Media Desk creative preset. Image generation uses a separate service or compatible registered tool. Publishing remains manual.
+Capture ideas, edit registered work Markdown directly in Wiki Notes, produce scripts and storyboards, and arrange a publishing calendar from a DSH sidebar workbench. Each work and the global assistant can use a persistent native DSH conversation with the Media Desk creative preset. A global image skill handles generation through the selected service or compatible registered tool. Publishing remains manual.
 
 ## Table of Contents
 
@@ -27,11 +27,31 @@ Install the fixed Git release into a separate DSH `0.2.2-rc.1` Web profile and o
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.12
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.13
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
 Open Media Desk in the sidebar. The package includes its Host entry and browser bundle. The upstream npm package and this fork share panel IDs, routes and data; enable only one in a profile. Workbench state and settings stay under `<DSH_HOME>/media-desk/`, with `~/.dsh` as the default home; registered work text lives in Wiki Notes. The [user guide](GUIDE.md) explains the five views, native input, images, recovery and file export.
+
+<a id="shared-skill"></a>
+### Shared Media Desk skill
+
+The [Media Desk skill](skills/media-desk/SKILL.md) organizes collecting material, research, planning, drafting, editing, visual assets, scheduling and review around the same work. Plugin stage instructions load its business references. The Agent edits content files directly; execution environments do not define separate editorial workflows.
+
+The same npm package provides the `media-desk` CLI. `read` reports registration and current file bytes; `validate` checks identity, format and optional expected fingerprints. Neither command writes content, snapshots, index or receipts. The Agent repairs files and validates again. In a package checkout, start with:
+
+```sh
+node scripts/media-desk-read.mjs --help
+```
+
+The plugin projects valid changes to registered files when it reads them and automatically registers valid new files in `notes/preferences/rules/` as proposals. The CLI reads unregistered proposals without writing registration data. Enabling requires user review; registration of other new content, metrics, scheduling and media acceptance remain plugin-owned. The [file and CLI reference](skills/media-desk/references/runtime.md) defines the format, duplicates, invalid files, deletion and current limits.
+
+<a id="global-image-skill"></a>
+### Global image skill
+
+The separate [image-generation skill](skills/image-generation/SKILL.md) handles channel selection, generation, editing and visual inspection for any project. Link `skills/image-generation` into the assistant's global skill directory. Its HTTP scripts use only Node standard libraries; the entire skill directory can run outside this package. Built-in Codex and explicitly selected Lupi requests use their installed skills. The [HTTP reference](skills/image-generation/references/http.md) defines independent configuration, execution and receipts.
+
+Media Desk supplies cover, illustration and storyboard briefs and registers returned files. Plugin background workers call the same skill's HTTP or DSH-tool scripts with existing image settings; each image does not start a model turn to interpret the skill. Session orchestration, rate-limit scheduling, media acceptance and save recovery remain in the plugin. Independent generation defaults to IMAGE_URL and IMAGE_API_KEY from the user’s global `.env`, with project or caller-supplied overrides; see the HTTP reference for precedence. Installing the skill does not migrate credentials.
 
 <a id="native-conversations"></a>
 ### Native conversations
@@ -40,7 +60,7 @@ The embedded assistant renders the ordinary DSH conversation with native input, 
 
 A new association uses the existing `WIKI_PATH` directory, or `~/wiki` when unset. Host configuration `wikiPath` overrides that choice. The Wiki determines the workspace and `<Wiki>/notes` root; a registered work uses its saved Wiki even for its first Session. Saved work and Session roots survive an environment change, including a symlinked Notes directory. Missing saved Wiki directories are not rebuilt. Changing the native workspace or preset requires restoring the bound Wiki and Media Desk preset before opening it from the workbench again.
 
-The native Session's selected model controls its conversation. The saved assistant model preference only initializes a new association; native model changes apply to the next unprepared step. Missing native services, preset or Wiki cause an explicit failure; existing associations remain available for inspection. Keep the same DSH home and restore the required profile components to continue an existing conversation.
+New Sessions use the DSH default model; legacy workbench model overrides are removed from settings. Existing Sessions retain their native model selection, and native model changes apply to the next unprepared step. Binding can complete with an unavailable model; production asks you to select an available native model before retrying. Missing native services, preset or Wiki cause an explicit failure; existing associations remain available for inspection. Keep the same DSH home and restore the required profile components to continue an existing conversation.
 
 <a id="notes-work-files"></a>
 ### Notes work files
@@ -91,7 +111,7 @@ pnpm test
 
 For local development, install the built checkout with `dsh plugin --profile media-desk-dev add "link:$PWD"`, then restart the development process and hard-refresh the browser.
 
-The upstream source is JavaScript. `typecheck` checks JavaScript syntax in `src`, `scripts` and `test`; the build parses the browser JSX. These commands do not provide static type checking. Build output `dist/client.js` is committed for remote installation without lifecycle builds; regenerate it whenever browser source changes. The npm lockfile remains available for upstream development, while the parent uses pnpm.
+The upstream source is JavaScript. `typecheck` checks JavaScript syntax in `src`, `scripts`, `test` and `skills`; the build parses the browser JSX. These commands do not provide static type checking. Build output `dist/client.js` is committed for remote installation without lifecycle builds; regenerate it whenever browser source changes. The npm lockfile remains available for upstream development, while the parent uses pnpm.
 
 The [native runtime fixture](test/fixtures/native-runtime.js) installs an isolated official Web profile and executes actual Loader, SessionController and tools against a temporary Wiki. Its model adapter controls only the external model response. The [skill instruction record](test/fixtures/llm-wiki.instructions.json) identifies the frozen `llm-wiki` instruction files; no personal Wiki pages are included.
 
@@ -123,11 +143,11 @@ The [native runtime fixture](test/fixtures/native-runtime.js) installs an isolat
 
 #### What the model sees
 
-Native conversations receive a creative persona, bound work/global identity and Wiki paths, local instructions, current time and ordinary Session history through [the creative context](src/native-context.js). The preset provides file, search, Shell, skill, web, question, approval and compaction capabilities. The effective `llm-wiki` skill reads selected pages and dated sources; it does not inject the whole Wiki. Topic summaries supply facts; only selected author samples supply personal writing style. Coding, plugin management, scheduling, goals and delegation workflows are absent from this preset.
+Native conversations receive a creative persona, bound work/global identity and Wiki paths, local instructions, current time and ordinary Session history through [the creative context](src/native-context.js). The preset provides file, search, Shell, skill, web, question, approval and compaction capabilities. The effective `llm-wiki` skill reads selected pages and dated sources; it does not inject the whole Wiki. Topic summaries supply facts; only selected author samples supply personal writing style. Coding, plugin management, scheduling, goals and delegation workflows are absent from this preset. Work-specific rule learning compares the saved body with fixed AI originals and optional edit feedback. A missing summary does not block comparison. Proposals retain evidence, scope, examples and related-rule references for review; duplicate rule text within the same scope is skipped. Production reads frozen preferences and requires a check for each enabled rule before accepting the body. The Host validates check coverage and fields; semantic compliance remains the writing assistant’s assessment.
 
 #### Token effect
 
-Ordinary Session history, loaded skill instructions and selected file contents increase input tokens. Wiki research loads the relevant query instructions and matching pages rather than every page.
+The shared skill entry is resident in creative context. Stages load the production or learning reference; other references are read on demand. Ordinary Session history, loaded skill instructions and selected file contents increase input tokens. Wiki research loads the relevant query instructions and matching pages rather than every page.
 
 #### KV Cache effect
 
@@ -152,9 +172,9 @@ The plugin does not manage a KV cache. Repeated prompt prefixes may be reused by
 <a id="known-limitations-and-deferred-work"></a>
 
 - Compatibility is pinned to the complete DSH `0.2.2-rc.1` Web profile. Scheduling does not publish to platforms, image failures can coexist with a completed production, and interrupted Host jobs require restarting production. Profiles using the same DSH home share workbench data and associations.
-- All text entry points use native Sessions. Syntax/build checks and controlled-model fixtures do not establish real model quality, paid image-service availability or subscription sign-in. The local acceptance record states the observed real model and browser results.
+- Plugin generation uses native Sessions; the Agent edits content directly and the npm CLI only reads and validates. Syntax/build checks and controlled-model fixtures do not establish real model quality, paid image-service availability or subscription sign-in. The local acceptance record states the observed real model and browser results.
 - Unsent attachments stay in the DSH browser runtime and do not survive a hard refresh; send them first or add them again. DSH manages sent attachment history and saved text drafts.
-- Interrupted or failed native creation stays pending. Inspect `/media-desk/sessions` or `<DSH_HOME>/media-desk/sessions.json` for its error and actual Session ID when available. Automatic replacement and pending-creation recovery are unavailable.
+- Interrupted or failed native creation stays pending. **Retry session binding** validates and binds the recorded Session without sending input or replacing its history. Without a recorded Session ID, use **Start a new conversation**. Inspect `/media-desk/sessions` or `<DSH_HOME>/media-desk/sessions.json` for retained errors and identities.
 - Migration preserves legacy work text, drafts, fixed AI originals, saved languages, collected material and editable writing preferences. Accepted media uses `notes/assets/<work-title>/`; sensitive provider settings and raw metrics remain outside Notes. Overlapping inverse edits require conflict repair; failed undo retains its record. Task-owned candidates need their task validation before a save retry can accept them.
 - Cooperative locks cover same-machine local Hosts. Ordinary editors do not take them. Retained editor handles can change displaced files after acceptance; subsequent reads preserve both versions and report a conflict. Notes publication and Store acceptance are separate steps, with a recovery journal rather than a filesystem transaction. DSH can force process exit after its five-second shutdown timeout, leaving production interrupted even when the launcher exits with code zero.
 

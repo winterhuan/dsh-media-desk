@@ -1,5 +1,14 @@
 // 英文词典（studio）。key 是中文原文，value 是英文。
 export const STUDIO = {
+  "从本次修改提炼规则": "Learn rules from these edits",
+  "提炼规则": "Learn rules",
+  "本次修改总结（可选）": "Edit summary (optional)",
+  "比较已保存正文与 AI 原稿；可补充已接受的修改要求，待确认建议请注明": "Compare the saved text with the AI original. Add accepted edit requests and mark any pending suggestions.",
+  "生成时的规则自检：{n} 条": "Generation rule checks: {n}",
+  "符合：{reason}": "Pass: {reason}",
+  "不适用：{reason}": "Not applicable: {reason}",
+  "自检由生成助手提供，后续改稿请重新核对": "Checks are reported by the writing assistant. Recheck after later edits.",
+
   '体裁': 'Format',
   '文章': 'Article',
   '生成图片': 'Generate images',

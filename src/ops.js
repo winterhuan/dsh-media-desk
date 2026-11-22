@@ -20,7 +20,7 @@ const ITEM_FIELDS = {
 const PERSON_FIELDS = { name: 'text', role: 'text', note: 'text', traits: 'list', tone: 'num' }
 const ANGLE_FIELDS = { name: 'text', hook: 'text', prompt: 'text' }
 const STYLE_FIELDS = { name: 'text', icon: 'text', summary: 'text', tone: 'text', sentences: 'text', opening: 'text', structure: 'text', words: 'list', avoid: 'list', samples: 'list' }
-const SKILL_FIELDS = { name: 'text', rule: 'text', source: 'text', status: 'text', confidence: 'num', evidence: 'text' }
+const SKILL_FIELDS = { name: 'text', rule: 'text', source: 'text', status: 'text', confidence: 'num', evidence: 'text', scope: 'text', before: 'text', after: 'text', relatedRuleId: 'text' }
 const METRIC_FIELDS = { itemId: 'id', platform: 'platform', date: 'date', views: 'num', likes: 'num', comments: 'num', shares: 'num', saves: 'num' }
 const ACCOUNT_FIELDS = { platform: 'text', handle: 'text', url: 'url', followers: 'num', note: 'text', title: 'text', description: 'text', avatar: 'url', fetchedAt: 'date', fetchError: 'text' }
 
@@ -261,11 +261,13 @@ const handlers = {
   },
   update_skill(state, op) {
     const skill = findById(state.skills, op.id)
+    if (['active', 'exported'].includes(op.status) && skill.content && skill.content.status !== 'ready') throw new Error(tr('规则文件尚不可用，请修复并刷新后启用'))
     Object.assign(skill, pick(SKILL_FIELDS, op))
     return { text: tr('更新规则「{name}」', { name: skill.name }), target: skill.id, kind: 'skill' }
   },
   delete_skill(state, op) {
     const skill = findById(state.skills, op.id)
+    if (skill.content && !state.deletedRuleIds?.includes(op.id)) (state.deletedRuleIds ??= []).push(op.id)
     state.skills = state.skills.filter(row => row.id !== op.id)
     return { text: tr('删除规则「{name}」', { name: skill.name }) }
   },

@@ -2,7 +2,7 @@
 import React from 'react'
 import { ChatPanel } from './chat.jsx'
 import { downloadCover } from './cover.js'
-import { cancelProduce, closeItem, dispatchOps, readWork, regenAsset, registerWorkFile, relinkWorkFile, revealSaved, runProduce, saveProduced, selectWorkLanguage, setDesk, toast, useDesk, watchProduction } from './desk.js'
+import { cancelProduce, closeItem, dispatchOps, learnSkills, readWork, regenAsset, registerWorkFile, relinkWorkFile, revealSaved, runProduce, saveProduced, selectWorkLanguage, setDesk, toast, useDesk, watchProduction } from './desk.js'
 import { plural, t } from './i18n.js'
 import { NativeSessionButton } from './native-session.jsx'
 import { Icon, IconButton } from './ui.jsx'
@@ -312,6 +312,15 @@ function ArticleTile({ item, open, onToggle, onView, tileRef }) {
     await navigator.clipboard.writeText(article)
     toast(content ? t('正文已复制') : t('脚本已复制'))
   }
+  const learnEdits = () => setDesk({ dialog: {
+    title: t('从本次修改提炼规则'), submitLabel: t('提炼规则'), initial: { feedback: '' },
+    fields: [
+      { name: 'work', type: 'hidden', label: item.title },
+      { name: 'feedback', type: 'textarea', rows: 6, label: t('本次修改总结（可选）'),
+        hint: t('比较已保存正文与 AI 原稿；可补充已接受的修改要求，待确认建议请注明') },
+    ],
+    onSubmit: values => learnSkills({ workId: item.id, feedback: values.feedback.trim(), expectedContent: content, throwOnError: true }),
+  } })
   const fileDialog = () => setDesk({ dialog: {
     title: content ? t('重新关联作品文件') : t('登记作品文件'),
     submitLabel: content ? t('重新关联') : t('登记'),
@@ -345,6 +354,7 @@ function ArticleTile({ item, open, onToggle, onView, tileRef }) {
       <header className="md-tile-head">
         <h2>{content ? t('正文') : t('脚本')}</h2>
         <span className="md-grow" />
+        {content && ready ? <IconButton icon="spark" label={t('从本次修改提炼规则')} disabled={saving || Boolean(editor) || running} onClick={learnEdits} /> : null}
         <IconButton icon="link" label={content ? t('重新关联作品文件') : t('登记作品文件')} disabled={saving} onClick={fileDialog} />
         {content ? <IconButton icon="refresh" label={t('重新读取正文')} disabled={saving || Boolean(editor)} onClick={reload} /> : null}
         {editor ? (
@@ -385,6 +395,11 @@ function ArticleTile({ item, open, onToggle, onView, tileRef }) {
       ) : content ? ready && <p className="md-note-status md-muted">{t('正文为空，点击直接修改开始写作')}</p> : (
         <div className={`md-skeleton ${running ? '' : 'is-still'}`} aria-hidden="true">{Array.from({ length: 12 }, (_, i) => <i key={i} />)}</div>
       )}
+      {production?.ruleChecks?.length ? <details className="md-rule-evidence md-note-status">
+        <summary>{t('生成时的规则自检：{n} 条', { n: production.ruleChecks.length })}</summary>
+        {production.ruleChecks.map(check => <p key={check.id}>{t(check.status === 'pass' ? '符合：{reason}' : '不适用：{reason}', { reason: check.reason })}</p>)}
+        <p>{t('自检由生成助手提供，后续改稿请重新核对')}</p>
+      </details> : null}
       {picked ? (
         <button type="button" className="md-pick" style={{ left: picked.x, top: picked.y }} onMouseDown={e => e.preventDefault()} onClick={() => {
           askAbout(t('这段'), picked.text, picked.version)

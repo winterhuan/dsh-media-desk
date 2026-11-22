@@ -66,33 +66,27 @@ test('#3 别的域名的下载地址照样拦内网', async () => {
   await assert.rejects(generateImage(GATEWAY, 'p', { fetchImpl: internal }), /本机|内网/)
 })
 
-test('PR #5 助手模型自选：指定后优先用，清空后跟随默认；提供方和模型要一起填', async () => {
-  const { modelInfo, setAssistantModel } = await import('../src/ai.js')
+test('移除旧助手模型覆盖时保留设置，显示模型跟随原生默认', async t => {
+  const { modelInfo } = await import('../src/ai.js')
   const { Settings } = await import('../src/settings.js')
-  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { mkdtemp, rm, writeFile, readFile } = await import('node:fs/promises')
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')
-  const ctx = { get: name => (name === 'llm' ? {} : name === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'deepseek', model: 'deepseek-chat' }) } : undefined) }
-  try {
-    assert.equal(modelInfo(ctx).model, 'deepseek-chat')
-    setAssistantModel({ provider: 'opencode-go', model: 'deepseek-v4.1-flash' })
-    assert.deepEqual(modelInfo(ctx), { provider: 'opencode-go', model: 'deepseek-v4.1-flash', label: 'deepseek-v4.1-flash' })
-    setAssistantModel({ provider: '', model: '' })
-    assert.equal(modelInfo(ctx).model, 'deepseek-chat')
-  } finally {
-    setAssistantModel(null)
-  }
-
+  let selection = { provider: 'deepseek', model: 'deepseek-chat' }
+  const ctx = { get: name => (name === 'llm' ? {} : name === 'agentDefaultModel' ? { currentSelection: () => selection } : undefined) }
+  assert.equal(modelInfo(ctx).model, 'deepseek-chat')
+  selection = { provider: 'changed', model: 'new-default' }
+  assert.equal(modelInfo(ctx).model, 'new-default')
   const dir = await mkdtemp(join(tmpdir(), 'media-desk-'))
-  try {
-    const settings = new Settings(dir)
-    assert.deepEqual((await settings.read()).assistant, { provider: '', model: '' })
-    await settings.update({ assistant: { provider: ' opencode-go ', model: 'm' } })
-    assert.deepEqual((await settings.read()).assistant, { provider: 'opencode-go', model: 'm' })
-    await assert.rejects(settings.update({ assistant: { provider: 'opencode-go', model: '' } }), /一起填/)
-    await settings.update({ voice: 'x' })
-    assert.deepEqual((await settings.read()).assistant, { provider: 'opencode-go', model: 'm' })
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const file = join(dir, 'settings.json')
+  const saved = { assistant: { provider: 'removed', model: 'missing' }, image: { apiKey: 'private-fixture' }, language: 'en', imageCount: 1 }
+  await writeFile(file, JSON.stringify(saved))
+  const settings = new Settings(dir)
+  assert.equal(Object.hasOwn(await settings.read(), 'assistant'), false)
+  delete saved.assistant
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), saved)
+  await settings.update({ voice: 'x', assistant: { provider: 'removed', model: 'missing' } })
+  assert.equal(Object.hasOwn(await settings.read(), 'assistant'), false)
+  assert.equal((await settings.read()).image.apiKey, 'private-fixture')
 })

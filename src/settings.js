@@ -6,8 +6,6 @@ import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 
 const DEFAULTS = {
   image: { source: 'http', baseUrl: '', model: '', apiKey: '', size: '1536x1024', quality: '', toolSize: '1536x1024', toolQuality: '', extra: '' },
-  // 助手文字模型：空对象表示跟随 DeepSeek Harness 默认模型
-  assistant: { provider: '', model: '' },
   voice: '',
   exportDir: '',
   generateImages: true,
@@ -37,7 +35,11 @@ export class Settings {
     // 每次都读文件：桌面版和 Web 版可能同时运行
     try {
       const saved = JSON.parse(await readFile(this.file, 'utf8'))
-      this.value = { ...DEFAULTS, ...saved, image: { ...DEFAULTS.image, ...saved.image }, assistant: { ...DEFAULTS.assistant, ...(saved.assistant ?? {}) } }
+      if (Object.hasOwn(saved, 'assistant')) {
+        delete saved.assistant
+        await writeFileAtomic(this.file, JSON.stringify(saved, null, 2), { mode: 0o600, dirMode: 0o700 })
+      }
+      this.value = { ...DEFAULTS, ...saved, image: { ...DEFAULTS.image, ...saved.image } }
     } catch (err) {
       if (err.code !== 'ENOENT') throw err
       this.value = structuredClone(DEFAULTS)
@@ -94,13 +96,6 @@ export class Settings {
     }
     if (typeof image.apiKey === 'string' && image.apiKey.trim()) next.image.apiKey = image.apiKey.trim()
     if (image.clearKey === true) next.image.apiKey = ''
-    if (patch.assistant && typeof patch.assistant === 'object') {
-      const provider = typeof patch.assistant.provider === 'string' ? patch.assistant.provider.trim().slice(0, 200) : ''
-      const model = typeof patch.assistant.model === 'string' ? patch.assistant.model.trim().slice(0, 200) : ''
-      // provider 和 model 要么都填（指定模型），要么都空（跟随默认）
-      if (Boolean(provider) !== Boolean(model)) throw Object.assign(new Error(tr('助手模型的提供方和模型要一起填')), { status: 400 })
-      next.assistant = { provider, model }
-    }
     if (typeof patch.voice === 'string') {
       const voice = patch.voice.slice(0, 8000)
       if (this.store) await this.store.updateVoice(voice)

@@ -14,6 +14,7 @@ export const CORE = {
   '设置': 'Settings',
   '助手': 'Assistant',
   '原生会话': 'Native session',
+  '重试建立关联': 'Retry session binding',
   '全局原生会话': 'Global native session',
   '工作台加载失败：{error}': 'Couldn’t load Media Desk: {error}',
   '重试': 'Retry',
@@ -52,11 +53,4 @@ export const CORE = {
   '关闭': 'Close',
   '撤销': 'Undo',
 
-  // 助手模型选择
-  '助手模型': 'Assistant model',
-  '跟随默认': 'Follow default',
-  '不指定时，助手跟随 DeepSeek Harness 的默认模型。': 'When unset, the assistant follows the DeepSeek Harness default model.',
-  '正在读取可用模型…': 'Loading available models…',
-  '还没有已接入的模型提供方。': 'No model providers are connected yet.',
-  '助手模型已切换': 'Assistant model switched',
 }

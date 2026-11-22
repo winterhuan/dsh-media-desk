@@ -1,5 +1,7 @@
 /** Creative preset context consumes the single Host service and actual Agent association. */
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import * as skillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
+import { skillEntry, skillInstructions, skillRoot } from './skill-driver.js'
 
 export const inject = ['mediaDesk', 'systemPrompt', 'tools']
 
@@ -9,6 +11,9 @@ export const inject = ['mediaDesk', 'systemPrompt', 'tools']
  * @returns {void}
  */
 export function apply(ctx) {
+  ctx.plugin(skillFilesystem, { providerName: 'media-desk-bundled', includeDefaultRoots: false, customSkillDirs: [skillRoot], watch: false })
+  ctx.systemPrompt.context({ name: 'media-desk:skill', order: 59, required: true, interpolate: false,
+    text: `Media Desk is driven by the bundled skill at ${skillEntry}.\n${skillInstructions()}` })
   const work = ctx.mediaDesk.nativeWork
   work.attach(ctx)
   const parse = (text, limit) => {
@@ -27,11 +32,11 @@ export function apply(ctx) {
     offset: { type: 'integer', description: 'Character offset in the complete JSON text, defaults to 0.' },
     limit: { type: 'integer', description: 'JSON text characters to return, 1–20000, defaults to 12000.' },
   }, (args, exec) => work.read(exec, args))
-  register('media_desk_validate', 'Check a registered Notes file’s format and identity. Returns valid or repair errors without changing files, snapshots, index, state or receipts.', {
-    file_path: { type: 'string', required: true, description: 'Absolute path of the edited work, material or preference file. A work Session checks its own work and material; the global assistant also checks writing preferences. Historical snapshots are not editable files.' },
+  register('media_desk_validate', 'Check a Notes file’s format and identity, including new writing rule proposals. Returns valid or repair errors without changing files, snapshots, index, state or receipts.', {
+    file_path: { type: 'string', required: true, description: 'Absolute path of the edited work, material or preference file. A work Session checks its own work and material; the global assistant also checks writing preferences and new proposals under notes/preferences/rules. Historical snapshots are not editable files.' },
   }, (args, exec) => work.validate(exec, args))
   register('media_desk_edit', 'Change workflow state, scheduling, metrics or production descriptions and return save receipts. Edit registered Markdown with native file tools, then media_desk_validate. Use media_desk_submit_result for structured stages. Writing rules require user review.', {
-    operations: { type: 'string', required: true, description: 'JSON array of 1–24 workflow operations, maximum 200000 characters: update_item for operational fields, schedule_item, set_status, delete_item, revise_production; global assistant also supports add_item, add/delete_skill, add/delete_style, set_style, add_metric, add/update/delete_person, add/update/delete_angle. revise_production: id, attemptId from production, revision {coverText, cover{prompt}, images[{no,caption,prompt}], shots[{no,shot,visual,voice,seconds,prompt}]}. Numbers are 1-based; seconds 1–60; up to 8 images and 24 shots. CoverText/caption/shot/visual/voice/prompt limits are 24/40/12/200/200/1200 characters. Returns redrawTargets for explicit media_desk_produce redraw. Other fields match media_desk_read.' },
+    operations: { type: 'string', required: true, description: 'JSON array of 1–24 workflow operations, maximum 200000 characters: update_item for operational fields, schedule_item, set_status, delete_item, revise_production; global assistant also supports add_item, add/delete_skill, add/delete_style, set_style, add_metric, add/update/delete_person, add/update/delete_angle. add_skill: name, rule, evidence, scope, optional before, after, relatedRuleId; status proposed for user review. revise_production: id, attemptId from production, revision {coverText, cover{prompt}, images[{no,caption,prompt}], shots[{no,shot,visual,voice,seconds,prompt}]}. Numbers are 1-based; seconds 1–60; up to 8 images and 24 shots. CoverText/caption/shot/visual/voice/prompt limits are 24/40/12/200/200/1200 characters. Returns redrawTargets for explicit media_desk_produce redraw. Other fields match media_desk_read.' },
     expectedContent: { type: 'string', description: 'JSON object mapping work identities to their current content versions from media_desk_read. Required for edits to a registered work.' },
     expectedPreferences: { type: 'string', description: 'JSON object mapping style:<id> or rule:<id> to its content version from media_desk_read preferences. Required for updating or deleting registered preferences.' },
     resultId: { type: 'string', description: 'Optional stable operation identity, at most 100 characters. Reuse it with identical arguments to recover the existing receipt.' },
@@ -55,7 +60,7 @@ export function apply(ctx) {
   })
   register('media_desk_submit_result', 'Submit a structured stage candidate. Matching duplicates return the existing candidate or receipt; acceptance requires the corresponding native turn to finish successfully and the Notes save to succeed.', {
     stageId: { type: 'string', required: true, description: 'Current owned stage identity from media_desk_read.' },
-    result: { type: 'string', required: true, description: 'JSON object, at most 200000 characters. plan: title, coverText, facts[], outline[], cover (nonempty image-prompt string), characters, images[{caption,anchor,prompt}], shots[{shot,visual,voice,seconds,prompt}], sources[]. facts: at most 8; outline: at most 6; images and shots: exactly stage.settings.imageCount and stage.settings.shotCount, even when imageReady is false; article: article and sources[]; style: name, summary, tone, sentences, opening, structure, words[], avoid[], samples[]; rules: rules[{name,rule,evidence}]. Each source has title, reference, date and limitations.' },
+    result: { type: 'string', required: true, description: 'JSON object, at most 200000 characters. plan: title, coverText, facts[], outline[], cover (nonempty image-prompt string), characters, images[{caption,anchor,prompt}], shots[{shot,visual,voice,seconds,prompt}], sources[]. facts: at most 8; outline: at most 6; images and shots: exactly stage.settings.imageCount and stage.settings.shotCount, even when imageReady is false; article: article, sources[], ruleChecks[{id,status,reason}] for every frozen writing rule, status pass or not-applicable, reason a concrete passage or scope explanation; fix violations before submitting. style: name, summary, tone, sentences, opening, structure, words[], avoid[], samples[]; rules: ruleFiles[{id,sha256}] from directly written, validated proposal files and pendingReview[string] for unconfirmed suggestions, each at most 24. Each source has title, reference, date and limitations.' },
   }, (args, exec) => work.submit(exec, { stageId: args.stageId, result: parse(args.result, 200000) }))
   ctx.systemPrompt.context({
     name: 'media-desk:association', order: 60, required: true, interpolate: false,
@@ -70,6 +75,7 @@ export function apply(ctx) {
         }) + '\nUse the effective llm-wiki skill to search relevant summaries, read selected full pages and check sources. '
           + 'Use absolute paths under the bound Wiki. For skill Shell commands set ' + wikiCommand + ' explicitly. '
           + 'Keep source dates and uncertainty. Knowledge summaries supply facts; only selected author samples supply personal writing style. '
+          + 'For writing-rule learning, read existing preferences and the selected work’s fixed AI original and current body. User-supplied edit feedback is optional; do not search the Wiki for a missing edit-summary document or make it a prerequisite. Compare available text, distinguish pending suggestions, and save supported proposals for user review. '
           + 'Read-only requests forbid material and knowledge writes. '
           + 'For ordinary file edits, read the registered path at content.notesRoot/content.relativePath, then use edit or write directly. '
           + 'Preserve the YAML metadata, registered id and language; keep historical snapshots unchanged. Validate the saved file with media_desk_validate and repair any errors before reporting completion. '

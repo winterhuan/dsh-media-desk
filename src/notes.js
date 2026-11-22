@@ -9,7 +9,7 @@ import { HISTORY_LIMIT, historyDirectory, unusedPath } from './notes-paths.js'
 
 const METADATA = ['title', 'tags', 'source', 'url', 'language', 'noteMetadata']
 const STYLE_TEXT = ['name', 'icon', 'summary', 'tone', 'sentences', 'opening', 'structure', 'words', 'avoid', 'samples', 'source', 'sourceUrls']
-const RULE_TEXT = ['name', 'rule', 'source', 'evidence']
+const RULE_TEXT = ['name', 'rule', 'source', 'evidence', 'scope', 'before', 'after', 'relatedRuleId']
 const MATERIAL_TEXT = ['title', 'body', 'source', 'url', 'createdAt', 'publishedAt', 'collectedAt', 'materialType', 'completeness', 'externalId', 'styleId', 'selectedAuthorSample']
 /** Fields retained with a work's language when selection or undo targets another language. */
 export const LANGUAGE_FIELDS = [...METADATA, 'body', 'content', 'media', 'drafts', 'production', 'sourceContent', 'textHistory', 'languageBasis']
@@ -68,7 +68,7 @@ export class Notes {
       ].sort((a, b) => a.id.localeCompare(b.id))
       const preferences = [
         ...state.styles.filter(row => row.content?.notesRoot === root && !row.preset && !row.sample).map(row => ({ id: `style:${row.id}`, title: row.name, path: row.content.relativePath })),
-        ...state.skills.filter(row => row.content?.notesRoot === root && !row.sample).map(row => ({ id: `rule:${row.id}`, title: row.name, path: row.content.relativePath })),
+        ...state.skills.filter(row => row.content?.notesRoot === root && !row.sample).map(row => ({ id: `rule:${row.id}`, title: row.name ?? row.id, path: row.content.relativePath })),
         ...(state.voice?.content?.notesRoot === root ? [{ id: 'voice', title: tr('个人语气'), path: state.voice.content.relativePath }] : []),
       ].sort((a, b) => a.id.localeCompare(b.id))
       const media = Object.values(state.mediaReferences ?? {}).filter(row => row.notesRoot === root)
@@ -615,6 +615,12 @@ export class Notes {
 
   async prepareManagedRow(before, row, kind, referenceKey = 'content') {
     const id = kind === 'voice' ? 'personal-voice' : row.id
+    // Undoing rule deletion reattaches its retained file instead of publishing over it.
+    if (kind === 'rule' && !before && row.content) {
+      const current = await this.readManaged(row.content, id, kind)
+      if (current.sha256 !== row.content.sha256) throw failure('notes/conflict', tr('Notes 内容已变化，请重新读取后再修改'))
+      return null
+    }
     if (kind === 'material') {
       row.collectedAt ??= new Date().toISOString()
       row.materialType ??= 'source'
@@ -964,6 +970,7 @@ export class Notes {
 
   durable(draft) {
     const durable = structuredClone(draft)
+    delete durable.ruleFileIssues
     const strip = item => {
       if (!item.content) return
       delete item.body

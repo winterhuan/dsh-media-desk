@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tr } from './i18n.js'
 
-const COLLECTIONS = new Set(['items', 'people', 'angles', 'styles', 'activeStyleId', 'skills', 'metrics', 'accounts', 'sampleCleared'])
+const COLLECTIONS = new Set(['items', 'people', 'angles', 'styles', 'activeStyleId', 'skills', 'deletedRuleIds', 'metrics', 'accounts', 'sampleCleared'])
 const ITEM_FIELDS = new Set(['kind', 'title', 'body', 'noteMetadata', 'language', 'url', 'source', 'tags', 'status', 'publishedAt', 'angleId', 'personaIds', 'parentId', 'rel', 'scheduledAt', 'platform', 'pinned', 'media', 'pos', 'score', 'drafts'])
 const PRODUCTION_FIELDS = new Set(['title', 'article', 'coverText', 'current', 'textVersion', 'aiVersion'])
 const WORK_FIELDS = new Set(['id', 'kind', 'createdAt', 'sample', 'localeLinked', 'imported', 'externalId', 'language', 'languageBasis', 'content', 'sourceContent', 'textHistory', 'languageHistory', 'otherLang',

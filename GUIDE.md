@@ -10,6 +10,7 @@ Capture ideas, research your Wiki through native DSH conversations, edit the cur
 
 - [Start and migrate](#start-and-migrate)
 - [Create and continue](#create-and-continue)
+- [Create with the Media Desk skill](#independent-skill)
 - [Use the five views](#use-the-five-views)
 - [Images and export](#images-and-export)
 - [Notes recovery](#notes-recovery)
@@ -28,11 +29,22 @@ Before using legacy data, stop old Media Desk processes. Open **Recover saves an
 
 Open a work in Studio and send a request in its embedded native conversation. Each work retains one ordinary DSH Session; the global assistant has a separate Session. The workspace entry and workbench open the same history, including tools, approval, questions, attachments and native draft input. Reopening the panel preserves the association.
 
-Choose the text model in the native conversation. A model change reaches the next step that has not prepared its request. Before production, choose **Script** or **Article**; scripts use one sentence per line, and articles use natural paragraphs. Clear **Generate images** to produce text and retain image descriptions for later individual redraws. Settings controls automatic images for new works; existing productions retain the previous format and image choice. **Produce** freezes these choices and admits one Host-owned plan attempt; repeated clicks reuse the active attempt. The Agent uses llm-wiki and the selected material, active style, enabled rules and personal voice. A successful accepted plan starts the body and selected image workers. Submitted or streaming candidates become formal text only after the matching successful native turn and Notes save.
+New conversations follow the DSH default model; existing conversations retain their selected model. Choose the text model in the native conversation. A model change reaches the next step that has not prepared its request. Before production, choose **Script** or **Article**; scripts use one sentence per line, and articles use natural paragraphs. Clear **Generate images** to produce text and retain image descriptions for later individual redraws. Settings controls automatic images for new works; existing productions retain the previous format and image choice. **Produce** freezes these choices and admits one Host-owned plan attempt; repeated clicks reuse the active attempt. The Agent uses llm-wiki and the selected material, active style, enabled rules and personal voice. A successful accepted plan starts the body and selected image workers. Submitted or streaming candidates become formal text only after the matching successful native turn and Notes save.
 
 Native **Stop** stops the current turn and retains pending input; already admitted images can settle. **Cancel production** stops the whole attempt and its images. Queue edits, removal and steering invalidate changed stage input. You can send again after Stop. **Start a new conversation** first stops active owned work, then binds a fresh Session; the old history, old pending inputs and accepted content remain.
 
+If session creation is incomplete, restore the required Wiki and DSH profile components, then choose **Retry session binding**. It reuses the recorded Session, preserves its model and history, and sends no message. If no Session ID was recorded, choose **Start a new conversation**; the previous association remains available for inspection. An unavailable model does not prevent binding; select an available model in the native conversation before producing again.
+
 Select a passage in the body and choose **Ask the assistant to edit this**. It enters the native draft with its selected content version. The Agent rereads the registered Notes file, edits it with native file tools and runs `media_desk_validate`; repair any reported format errors in the file. The workbench picks up valid changes on refresh. Direct edits survive Stop or a failed turn and do not create a workbench undo entry. If the passage has changed, select it again from the latest body. Workbench saves and structured stages retain their version and conflict checks.
+
+<a id="independent-skill"></a>
+## Create with the Media Desk skill
+
+Use the [Media Desk skill](skills/media-desk/SKILL.md) for the relevant editorial task. Read the work and enabled preferences first, edit content with the Agent's file tools, then use `media-desk validate` and repair reported errors. The npm CLI ships with the plugin and reads the same registered files; it does not save or automatically repair them.
+
+Rule learning compares the current body with fixed AI originals and optional feedback from the conversation. A separate edit-summary document is not required. Proposals retain evidence, scope and examples for review before enablement.
+
+The Agent writes proposals directly to `notes/preferences/rules/<rule-id>.md`; opening the plugin or clicking **Writing rules → Refresh** registers valid proposals while validation stays read-only. The rule list reports duplicate and invalid files. Deleted rules do not reappear from retained files; use a new ID to propose them again. Other new content still needs registration; the plugin enables rules and accepts media. The [file and CLI reference](skills/media-desk/references/runtime.md) defines formats and commands.
 
 <a id="use-the-five-views"></a>
 ## Use the five views
@@ -45,10 +57,14 @@ Select a passage in the body and choose **Ask the assistant to edit this**. It e
 
 Select a built-in style or extract a custom style from explicitly pasted or selected webpage author samples. Knowledge summaries supply evidence rather than author style. Review generated rule proposals and enable the ones you want. Exporting `media-desk-voice` uses the currently active custom style and rules; an old exported skill cannot silently reactivate a disabled rule.
 
+Choose **Learn rules from these edits** in a work’s **Body** tile or explicitly ask the assistant to learn, optionally providing an edit summary. The assistant reads existing rules first, compares the body with fixed AI originals and deduplicates using feedback; ordinary edits do not automatically generate rules. Article lengths, parameters and numbers do not become general preferences; pending suggestions remain separately in `notes/preferences/reviews/<work-id>.md`. **Style → Writing rules** shows evidence, scope, edit examples and related rules for review and enabling. Enable rules before starting production. Each attempt reads fixed preference versions and must submit a check for every enabled rule. Expand the checks below the body; these are assistant reports and need rechecking after later edits.
+
 Automatic account collection and its Monid setup are unavailable. Historical accounts, collected posts, ordinary links and metrics remain. Manual metrics can link to a work; CSV represents platform totals. Imports append records, so importing repeated cumulative snapshots can double count. These summaries do not provide live per-post updates or prove that a writing rule caused an outcome.
 
 <a id="images-and-export"></a>
 ## Images and export
+
+For standalone image requests, use the global [image-generation skill](skills/image-generation/SKILL.md). Media Desk passes visual briefs to it and accepts returned files through the asset operation; plugin workers use its execution scripts. Independent HTTP configuration and result receipts are described in the [image reference](skills/image-generation/references/http.md). File validation does not replace visual inspection.
 
 Configure image count, storyboard count and an image source in Settings. The HTTP source uses the configured OpenAI-compatible Images API and a private key. The tool source reuses compatible `image_generate` registration from `dsh-plugin-subscriptions`, including its collision alias. Tool size and quality are independent of retained HTTP settings. **Generate test image** makes a real paid or quota-consuming request; detection alone does not verify login or quota.
 

@@ -24,6 +24,7 @@ function references(value, result = new Map()) {
 export async function requiredHistory(store) {
   const state = store.state
   const keep = references([state.items, state.styles, state.skills, state.voice, state.notesUndo,
+    state.skillRequests?.filter(row => row.status === 'prepared'),
     state.nativeRequests?.filter(row => !['accepted', 'rejected', 'failed', 'cancelled', 'superseded'].includes(row.status))])
   for (const entry of state.notesUndo ?? []) references(await readUndoChanges(entry, store.filesDir), keep)
   const accepted = new Set(state.receipts?.map(receipt => receipt.id))

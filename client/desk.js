@@ -8,7 +8,7 @@ const BASE = 'media-desk/'
 let snapshot = {
   state: null, model: null, modelOk: null, modelError: null, canUndo: false, undoId: null, error: null,
   view: 'home', mode: 'scatter', focusId: null, sheetOrigin: null, dockOpen: true, studioDock: false, chatQuote: null, query: '', kindFilter: 'all', related: null,
-  live: {}, settings: null, settingsOpen: false, notesRecovery: false, modelPickOpen: false, thinking: false, toast: null, capture: null, dialog: null,
+  live: {}, settings: null, settingsOpen: false, notesRecovery: false, thinking: false, toast: null, capture: null, dialog: null,
 }
 const listeners = new Set()
 
@@ -35,7 +35,7 @@ async function request(path, body) {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-media-desk-lang': lang() }, body: JSON.stringify(body),
   })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw Object.assign(new Error(data.error || t('请求失败（{status}）', { status: res.status })), { code: data.code, pendingId: data.pendingId })
+  if (!res.ok) throw Object.assign(new Error(data.error || t('请求失败（{status}）', { status: res.status })), { code: data.code, pendingId: data.pendingId, canRetry: data.canRetry })
   return data
 }
 
@@ -70,6 +70,15 @@ export async function loadDesk() {
 export async function openNativeSession(workId) {
   const { association } = await request('sessions/open', { workId })
   return association
+}
+
+/**
+ * Complete a retained association without dispatching input or creating another Session.
+ * @param {string|null} workId - Work identity, or null for the global assistant.
+ * @returns {Promise<object>} Recovered association with its existing native Session.
+ */
+export async function retryNativeSession(workId) {
+  return (await request('sessions/retry', { workId })).association
 }
 
 /** Start a fresh conversation while retaining the old native Session and draft. */
@@ -260,23 +269,6 @@ export async function saveSettings(payload) {
   }
 }
 
-export async function fetchModels() {
-  return request('models')
-}
-
-/** 切换助手模型；两个字段都空表示跟随默认。 */
-export async function saveAssistant(assistant) {
-  try {
-    const settings = await request('settings', { assistant })
-    setDesk({ settings, model: settings.assistantEffective ?? snapshot.model })
-    toast(t('助手模型已切换'))
-    return true
-  } catch (err) {
-    report(err)
-    return false
-  }
-}
-
 export async function testImage(payload) {
   try {
     const settings = await request('settings', payload)
@@ -365,12 +357,14 @@ export async function extractStyle(payload) {
   }
 }
 
-export async function learnSkills() {
+export async function learnSkills({ workId, feedback, expectedContent, throwOnError = false } = {}) {
   try {
-    const data = await request('skills/learn', {})
+    const data = await request('skills/learn', { workId, feedback, expectedContent })
     installNotesState(data)
-    setDesk({ dockOpen: true })
+    setDesk({ dockOpen: true, ...(workId ? { focusId: null, view: 'style' } : {}) })
+    toast(t('已开始提炼，完成后在写作规则中审阅启用'))
   } catch (err) {
+    if (throwOnError) throw err
     report(err)
   }
 }

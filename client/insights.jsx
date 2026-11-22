@@ -1,5 +1,6 @@
 // 数据复盘。
 import React from 'react'
+import { RuleEvidence } from './rules.jsx'
 import { dispatchOps, fetchInsights, learnSkills, openItem, setDesk, toast, useDesk } from './desk.js'
 import { EN } from './en/index.js'
 import { lang, plural, t, useLang } from './i18n.js'
@@ -266,7 +267,8 @@ export function InsightsView() {
             {proposed.length ? proposed.slice(0, 4).map(skill => (
               <div key={skill.id} className="md-i-tip">
                 <strong>{skill.name}</strong>
-                <p>{skill.evidence ?? skill.rule}</p>
+                <p>{skill.rule}</p>
+                <RuleEvidence skill={skill} skills={skills} />
                 <button type="button" className="md-pill is-small" onClick={() => dispatchOps([{ op: 'update_skill', id: skill.id, status: 'active' }], { label: t('启用规则「{name}」', { name: skill.name }) })}>{t('写进规则')}</button>
               </div>
             )) : <p className="md-muted">{t('点「重新分析」，从现有数据里找出值得坚持的做法。')}</p>}

@@ -28,13 +28,11 @@ export class NativeSessions {
   /**
    * @param {object} ctx - Host context providing the public native services.
    * @param {object} store - The Host's single content Store.
-   * @param {object} settings - The Host's settings reader.
    * @param {object} [config] - Optional Wiki directory for this Host.
    */
-  constructor(ctx, store, settings, config = {}) {
+  constructor(ctx, store, config = {}) {
     this.ctx = ctx
     this.store = store
-    this.settings = settings
     this.wikiPath = config.wikiPath ?? process.env.WIKI_PATH ?? join(homedir(), 'wiki')
     this.file = join(store.root, 'sessions.json')
     this.associations = []
@@ -101,7 +99,7 @@ export class NativeSessions {
 
   /**
    * Create or recover the object's ordinary Session without sending an input.
-   * Pending creation is retained for inspection and never silently retried.
+   * Pending creation requires an explicit retry; opening never dispatches input.
    * @param {string|null} [workId] - Work identity; null selects the separate global assistant.
    * @returns {Promise<object>} Durable actual Session, workspace, home, preset and native model association.
    */
@@ -109,7 +107,17 @@ export class NativeSessions {
     return this.resets.get(workId) ?? this.openBound(workId)
   }
 
-  openBound(workId = null) {
+  /**
+   * Complete interrupted binding to the recorded Session without dispatching input.
+   * @param {string|null} [workId] - Work identity; null selects the global assistant.
+   * @returns {Promise<object>} Bound association; concurrent operations share the same result.
+   * @throws {Error} When no Session identity was recorded or its ownership, services or persistence cannot be verified.
+   */
+  retry(workId = null) {
+    return this.resets.get(workId) ?? this.openBound(workId, true)
+  }
+
+  openBound(workId = null, retry = false) {
     if (workId !== null && (typeof workId !== 'string' || !workId || workId.length > 200)) {
       return Promise.reject(failure('association/invalid-work', tr('作品标识无效'), 400))
     }
@@ -122,7 +130,17 @@ export class NativeSessions {
         throw failure('association/work-not-found', tr('作品不存在：{id}', { id: workId }), 404)
       }
       const saved = this.associations.find(row => row.workId === workId && row.active !== false)
-      if (saved) return this.restore(saved)
+      if (saved) {
+        if (retry && saved.status === 'pending') {
+          if (!saved.sessionId) throw this.pendingError(saved)
+          if (work?.content && (work.content.wikiRoot !== saved.wikiRoot || work.content.notesRoot !== saved.notesRoot)) {
+            throw failure('association/notes-mismatch', tr('作品文件与 Wiki 位置不一致，请修复作品关联'))
+          }
+          return this.bind(saved)
+        }
+        return this.restore(saved)
+      }
+      if (retry) throw failure('association/unbound', tr('此原生会话尚未绑定 Media Desk 对象，请从工作台打开会话'))
       if (work?.content && (work.content.status !== 'ready' || !this.store.notes.roots.has(work.content.notesRoot))) {
         throw failure(work.content.code ?? 'notes/unowned-root', work.content.error ?? tr('作品所在的 Notes 目录尚未取得写入所有权'))
       }
@@ -143,12 +161,9 @@ export class NativeSessions {
       throw failure('association/notes-mismatch', tr('作品文件与 Wiki 位置不一致，请修复作品关联'))
     }
     const { workspace } = await this.service('workspaceController').create({ path: wikiRoot })
-    const settings = await this.settings.read()
-    const model = settings.assistant.provider && settings.assistant.model
-      ? settings.assistant : this.service('agentDefaultModel').currentSelection()
     const pending = { id: randomUUID(), workId, status: 'pending', dshHome: this.home,
       wikiRoot, notesRoot, workspaceId: workspace.workspaceId, preset: PRESET,
-      model: { ...model }, createdAt: new Date().toISOString() }
+      createdAt: new Date().toISOString() }
     this.associations.push(pending)
     await this.save()
     try {
@@ -156,16 +171,7 @@ export class NativeSessions {
       pending.sessionId = created.sessionId
       pending.preset = created.agentPreset
       await this.save()
-      const resolved = await controller.resolveAgent(created.sessionId)
-      if (resolved.error) throw resolved.error
-      const { selected } = await controller.selectModel({ sessionId: created.sessionId, ...model })
-      await controller.rename({ sessionId: created.sessionId, title: title ?? tr('Media Desk · 全局助手') })
-      if (!await this.service('sessions').flush(resolved.agent.session)) {
-        throw failure('native/not-durable', tr('原生会话尚未持久保存，请检查 Session 存储服务'), 503)
-      }
-      const bound = { ...pending, model: { ...selected }, status: 'bound' }
-      await this.save(this.associations.map(row => row.id === pending.id ? bound : row))
-      return structuredClone(bound)
+      return await this.bind(pending, title ?? tr('Media Desk · 全局助手'))
     } catch (error) {
       pending.status = 'pending'
       if (typeof error.details?.sessionId === 'string') pending.sessionId = error.details.sessionId
@@ -175,9 +181,39 @@ export class NativeSessions {
     }
   }
 
+  pendingError(saved) {
+    const canRetry = Boolean(saved.sessionId)
+    const message = canRetry
+      ? tr('会话创建未完成：{error}。可重试建立关联，或开始新对话', { error: saved.error?.message ?? tr('初始化被中断') })
+      : tr('会话创建未完成，尚未记录会话标识；请开始新对话')
+    return Object.assign(failure('association/pending', message), { canRetry })
+  }
+
+  async bind(saved, title) {
+    if (saved.dshHome !== this.home) throw failure('association/wrong-home', tr('此会话属于另一个 DSH home，请恢复原来的运行环境'))
+    const wikiRoot = await wikiDirectory(saved.wikiRoot)
+    const notesRoot = await realpath(join(wikiRoot, 'notes'))
+    if (!this.store.notes.roots.has(notesRoot) || saved.notesRoot !== notesRoot) {
+      throw failure('association/notes-mismatch', tr('作品文件与 Wiki 位置不一致，请修复作品关联'))
+    }
+    await this.preset()
+    const controller = this.service('sessionController')
+    const resolved = await controller.resolveAgent(saved.sessionId)
+    if (resolved.error) throw failure(resolved.error.code, resolved.error.message, 503)
+    this.checkAssociation(saved, resolved.agent)
+    if (title !== undefined) await controller.rename({ sessionId: saved.sessionId, title })
+    if (!await this.service('sessions').flush(resolved.agent.session)) {
+      throw failure('native/not-durable', tr('原生会话尚未持久保存，请检查 Session 存储服务'), 503)
+    }
+    const bound = { ...saved, model: { ...resolved.agent.model.current() }, status: 'bound' }
+    delete bound.error
+    await this.save(this.associations.map(row => row.id === saved.id ? bound : row))
+    return structuredClone(bound)
+  }
+
   async restore(saved) {
     if (saved.dshHome !== this.home) throw failure('association/wrong-home', tr('此会话属于另一个 DSH home，请恢复原来的运行环境'))
-    if (saved.status !== 'bound') throw failure('association/pending', tr('会话创建尚未完成，请检查保留的会话关联'))
+    if (saved.status !== 'bound') throw this.pendingError(saved)
     await wikiDirectory(saved.wikiRoot)
     await this.preset()
     const resolved = await this.service('sessionController').resolveAgent(saved.sessionId)
@@ -197,6 +233,12 @@ export class NativeSessions {
   requireAssociation(agent) {
     const row = this.associations.find(entry => entry.status === 'bound' && entry.active !== false && entry.sessionId === agent?.session?.id)
     if (!row || row.dshHome !== this.home) throw failure('association/unbound', tr('此原生会话尚未绑定 Media Desk 对象，请从工作台打开会话'))
+    this.checkAssociation(row, agent)
+    return row
+  }
+
+  checkAssociation(row, agent) {
+    if (row.active === false || row.sessionId !== agent.session.id) throw failure('association/unbound', tr('此原生会话尚未绑定 Media Desk 对象，请从工作台打开会话'))
     const workspace = this.service('workspaceRegistry').get(row.workspaceId)
     if (!workspace?.sessionIds.includes(row.sessionId) || workspace.path !== row.wikiRoot
       || agent.session.header.cwd !== row.wikiRoot
@@ -206,7 +248,6 @@ export class NativeSessions {
     if (this.service('agentPresets').composedPreset(agent.ctx) !== row.preset) {
       throw failure('association/preset-changed', tr('会话组合与作品关联不一致，请恢复原创作组合后重试'))
     }
-    return row
   }
 
   /** Preserve the old Session and its inbox; future work receives a fresh durable association. */
@@ -214,13 +255,13 @@ export class NativeSessions {
     const existing = this.resets.get(workId)
     if (existing) return existing
     const operation = (async () => {
-      await this.operations.get(workId)
+      await Promise.allSettled([this.operations.get(workId)])
       await this.ctx.mediaDesk.producer.cancel(workId)
       await this.ctx.mediaDesk.nativeWork.cancel(workId, { all: true })
-      await this.store.run(async () => {
+      await this.store.run(() => withFileLock(this.file, async () => {
         await this.reload()
         await this.save(this.associations.map(row => row.workId === workId && row.active !== false ? { ...row, active: false } : row))
-      })
+      }))
       return this.openBound(workId)
     })()
     this.resets.set(workId, operation)

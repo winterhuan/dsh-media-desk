@@ -1,0 +1,3 @@
+interface:
+  display_name: "全局生图"
+  short_description: "跨项目生成、修改和检查图片，统一渠道选择、图像文件与结果回执"

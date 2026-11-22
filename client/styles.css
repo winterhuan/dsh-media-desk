@@ -774,6 +774,9 @@ button.md-stamp:not(:disabled):hover { transform: scale(1.08) rotate(-2deg); }
 .md-rule > div { flex: 1; min-width: 0; }
 .md-rule strong { display: block; font-size: 13.5px; line-height: 20px; font-weight: 500; }
 .md-rule p { color: var(--ink2); font-size: 12.5px; line-height: 19px; }
+.md-rule-evidence { margin-top: 8px; font-size: 12.5px; line-height: 19px; color: var(--ink2); overflow-wrap: anywhere; }
+.md-rule-evidence summary { cursor: pointer; }
+.md-rule-evidence p { margin-top: 4px; white-space: pre-wrap; }
 .md-rule .md-icon-btn { width: 28px; height: 28px; opacity: 0; transition: opacity .15s; }
 .md-rule:hover .md-icon-btn, .md-rule .md-icon-btn:focus-visible { opacity: 1; }
 .md-rule-empty { padding: 8px 10px 12px; font-size: 13px; }

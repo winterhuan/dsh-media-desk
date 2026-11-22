@@ -1,17 +1,21 @@
 /** Host-owned native stage binding and candidate acceptance for registered creative objects. */
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { isAbsolute, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { applyOps } from './ops.js'
 import { normalizeStyle } from './style.js'
 import { applyRevision } from './produce.js'
 import { tr } from './i18n.js'
+import { DeskReader } from './desk-reader.js'
+import { validateRuleProposal } from './rule-files.js'
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const failure = (code, message, status = 409) => Object.assign(new Error(message), { code, status })
 const active = row => ['pending', 'running', 'waiting', 'candidate', 'save-failed'].includes(row.status)
-const stageText = row => `Media Desk stage ${row.id} (${row.kind}).\n${row.instructions}\nRead media_desk_read for the stage and current Notes version. Submit the structured candidate using media_desk_submit_result, then finish this turn. Do not poll acceptance within this turn: the Host accepts a candidate only after the native turn succeeds. For this structured stage, submit a candidate without editing its current Notes file.`
+const stageText = row => `Media Desk stage ${row.id} (${row.kind}).\n${row.instructions}\nRead media_desk_read for the stage and current Notes version. Submit the structured candidate using media_desk_submit_result, then finish this turn. Do not poll acceptance within this turn: the Host accepts a candidate only after the native turn succeeds. `
+  + (row.kind === 'rules' ? 'Write proposal files directly under stage.ruleDirectory, validate them and submit ruleFiles[{id,sha256}] plus pendingReview[]. Do not edit the source work or activate rules.'
+    : 'For this structured stage, submit a candidate without editing its current Notes file.')
 const readonly = messages => messages.some(message => message.source?.kind === 'user'
   && /\bread[ -]only\b|只读|禁止写入|不要(?:保存|写入|修改)/i.test(message.content.filter(block => block.type === 'text').map(block => block.text).join('\n')))
 
@@ -217,7 +221,7 @@ export class NativeWork {
       const stage = state.nativeRequests?.findLast(row => row.associationId === association.id && active(row))
       if (association.workId === null) return page({ voice: state.voice, activeStyleId: state.activeStyleId,
         styles: state.styles.filter(row => !row.sample).map(({ samples, sampleContent, sampleMaterial, ...style }) => style),
-        rules: state.skills.filter(row => !row.sample), stage: this.currentStage(state, association) })
+        rules: state.skills.filter(row => !row.sample), ruleFileIssues: state.ruleFileIssues, stage: this.currentStage(state, association) })
       if (stage?.data.preferenceVersions) {
         const refs = stage.data.preferenceVersions
         const load = async reference => {
@@ -225,7 +229,7 @@ export class NativeWork {
           if (reference.presetId) return state.styles.find(row => row.id === reference.presetId)
           const bytes = await this.store.notes.readBytes(reference)
           if (createHash('sha256').update(bytes).digest('hex') !== reference.sha256) throw failure('native/preference-conflict', 'Frozen writing preference changed')
-          return this.store.notes.parseManaged(bytes, reference, reference.id, reference.kind).value
+          return { id: reference.id, ...this.store.notes.parseManaged(bytes, reference, reference.id, reference.kind).value }
         }
         return page({ voice: await load(refs.voice), style: await load(refs.style), rules: await Promise.all(refs.rules.map(load)), stage: this.currentStage(state, association) })
       }
@@ -244,7 +248,9 @@ export class NativeWork {
     return { id: stage.id, kind: stage.kind, workId: stage.workId, status: stage.status,
       expectedContent: stage.expectedContent, instructions: stage.instructions,
       settings: stage.data.settings, format: stage.data.format, withImages: stage.data.withImages, preferenceVersions: stage.data.preferenceVersions,
-      selectedMaterial: stage.data.sampleMaterial, planId: stage.data.planId, language: stage.data.language, materialVersion: stage.data.materialVersion }
+      selectedMaterial: stage.data.sampleMaterial, planId: stage.data.planId, language: stage.data.language, materialVersion: stage.data.materialVersion,
+      learningSource: stage.data.learningSource, editFeedback: stage.data.editFeedback,
+      ...(stage.kind === 'rules' ? { ruleDirectory: join(this.store.notes.root, 'preferences/rules') } : {}) }
   }
 
   /** Validate registered file bytes without invoking Store hydration or publishing a save. */
@@ -269,6 +275,14 @@ export class NativeWork {
       add(state.voice?.content, 'personal-voice', 'voice')
     }
     const file = files.find(({ reference }) => join(reference.notesRoot, reference.relativePath) === resolve(file_path))
+    const newRulePath = [...this.store.notes.roots].some(root => /^preferences\/rules\/[^/]+\.md$/.test(relative(root, resolve(file_path)).replaceAll('\\', '/')))
+    if (!file && association.workId === null && newRulePath) {
+      const reader = await new DeskReader({ dataRoot: dirname(this.store.file), wikiRoot: this.store.notes.wikiRoot }).load()
+      const result = await reader.file(file_path)
+      exec.signal.throwIfAborted()
+      return { file_path: resolve(file_path), id: result.id, kind: 'rule', registered: false,
+        valid: result.valid, sha256: result.sha256, errors: result.errors }
+    }
     if (!file) throw failure('native/file-unregistered', 'This Session has no editable registered file at this path. Read media_desk_read for its current content reference.', 403)
     const result = await this.store.notes.validate(file.reference, file.id, file.kind)
     exec.signal.throwIfAborted()
@@ -419,6 +433,14 @@ export class NativeWork {
       const request = { id: randomUUID(), requestId: randomUUID(), kind, workId, producer: Boolean(producer), status: 'pending',
         expectedContent: work?.content ? { [workId]: structuredClone(work.content) } : {},
         createdAt: new Date().toISOString(), instructions, data }
+      if (kind === 'rules' && data.sourceWorkId) {
+        const source = state.items.find(row => row.id === data.sourceWorkId)
+        if (!source?.content) throw failure('native/work-missing', tr('作品尚未登记 Notes 文件'), 404)
+        this.store.notes.assertExpected(state, { [source.id]: data.expectedSourceContent })
+        request.expectedContent = { [source.id]: structuredClone(source.content) }
+        request.data.learningSource = { id: source.id, title: source.title, current: source.content.snapshot,
+          originals: [source.production?.aiVersion, ...Object.values(source.drafts ?? {}).map(row => row.aiVersion)].filter(Boolean) }
+      }
       if (producer) {
         const settings = await this.ctx.mediaDesk.settings.read()
         await writeFileAtomic(join(this.store.root, 'native-settings', request.id + '.json'), JSON.stringify(settings), { mode: 0o600, dirMode: 0o700 })
@@ -450,6 +472,12 @@ export class NativeWork {
       const association = await this.sessions.open(workId)
       const resolved = await this.service('sessionController').resolveAgent(association.sessionId)
       if (resolved.error) throw resolved.error
+      const model = resolved.agent.model.current()
+      const llm = this.service('llm')
+      if (!model || !llm.listProviders().some(row => row.id === model.provider)
+        || !(await llm.listModels(model.provider)).some(row => row.id === model.model)) {
+        throw failure('session/model-unavailable', tr('当前模型不可用，请在原生会话中选择可用模型后重试'), 503)
+      }
       await this.store.run(async () => {
         await this.store.mutate('关联原生任务', draft => {
           const row = draft.nativeRequests.find(row => row.id === claimed.request.id)
@@ -464,7 +492,14 @@ export class NativeWork {
     } catch (error) {
       await this.store.mutate('原生任务受理失败', draft => {
         const row = draft.nativeRequests.find(row => row.id === claimed.request.id)
-        if (active(row)) { row.status = 'failed'; row.error = error.message }
+        if (active(row)) {
+          row.status = 'failed'
+          row.error = error.message
+          const production = draft.items.find(work => work.id === row.workId)?.production
+          if (row.producer && production?.attemptId === row.id && production.status === 'running') {
+            Object.assign(production, { status: 'failed', stage: 'done', error: error.message, finishedAt: new Date().toISOString() })
+          }
+        }
       }, { undoable: false })
       throw error
     }
@@ -486,6 +521,7 @@ export class NativeWork {
     if (!active(stage)) throw failure('native/stage-stale', 'Stage was interrupted or canceled')
     if (!result || typeof result !== 'object' || Array.isArray(result) || JSON.stringify(result).length > 200000) throw failure('native/result-invalid', 'Candidate must be a bounded JSON object', 400)
     this.validateResult(stage, result)
+    if (stage.kind === 'rules' && result.ruleFiles) this.validateRuleFiles(state, result.ruleFiles)
     await writeFileAtomic(join(this.store.root, 'native-candidates', stageId + '.json'), JSON.stringify(result), { mode: 0o600, dirMode: 0o700 })
     await this.store.mutate('暂存原生候选', draft => {
       const row = draft.nativeRequests.find(row => row.id === stageId)
@@ -499,12 +535,49 @@ export class NativeWork {
   validateResult(stage, result) {
     if (stage.kind === 'article' && (typeof result.article !== 'string' || !result.article.trim() || result.article.length > 200000)) throw failure('native/article-invalid', 'Provide a nonempty Markdown article', 400)
     if (stage.kind === 'style' && (typeof result.name !== 'string' || !result.name.trim() || typeof result.summary !== 'string' || !result.summary.trim())) throw failure('native/style-invalid', 'Provide an observed style name and summary', 400)
-    if (stage.kind === 'rules' && (!Array.isArray(result.rules) || result.rules.length > 24 || result.rules.some(row => typeof row.name !== 'string' || typeof row.rule !== 'string' || !row.rule.trim()))) throw failure('native/rules-invalid', 'Provide up to 24 writing rule proposals', 400)
+    if (stage.kind === 'rules' && result.ruleFiles !== undefined) {
+      if (result.rules !== undefined || !Array.isArray(result.ruleFiles) || result.ruleFiles.length > 24
+        || new Set(result.ruleFiles.map(row => row?.id)).size !== result.ruleFiles.length
+        || result.ruleFiles.some(row => !row || typeof row.id !== 'string' || !row.id || row.id.length > 200
+          || !/^[a-f0-9]{64}$/.test(row.sha256) || Object.keys(row).some(key => !['id', 'sha256'].includes(key)))) {
+        throw failure('native/rules-invalid', 'Provide up to 24 distinct validated rule file identities and sha256 values', 400)
+      }
+    } else if (stage.kind === 'rules' && (!Array.isArray(result.rules) || result.rules.length > 24 || result.rules.some(row => !row
+      || typeof row.name !== 'string' || !row.name.trim() || typeof row.rule !== 'string' || !row.rule.trim()
+      || typeof row.evidence !== 'string' || !row.evidence.trim() || typeof row.scope !== 'string' || !row.scope.trim()
+      || ['before', 'after', 'relatedRuleId'].some(key => row[key] !== undefined && typeof row[key] !== 'string')
+      || Object.keys(row).some(key => !['name', 'rule', 'evidence', 'scope', 'before', 'after', 'relatedRuleId'].includes(key))))) throw failure('native/rules-invalid', 'Provide up to 24 writing rule proposals with evidence and scope', 400)
+    if (stage.kind === 'article') {
+      const ids = (stage.data.preferenceVersions?.rules ?? []).map(row => row.id)
+      const checks = result.ruleChecks ?? []
+      if (!Array.isArray(checks) || checks.length !== ids.length || new Set(checks.map(row => row?.id)).size !== ids.length
+        || checks.some(row => !row || !ids.includes(row.id) || !['pass', 'not-applicable'].includes(row.status)
+          || typeof row.reason !== 'string' || !row.reason.trim() || row.reason.length > 2000
+          || Object.keys(row).some(key => !['id', 'status', 'reason'].includes(key)))) throw failure('native/rule-checks-required', 'Check every frozen writing rule exactly once; provide id, pass or not-applicable, and a concrete reason. Fix violations before submitting.', 400)
+    }
     if (stage.kind === 'plan') this.ctx.mediaDesk.producer.validatePlan(result, stage.data.settings)
-    const allowed = { article: ['article', 'sources'], style: ['name', 'summary', 'tone', 'sentences', 'opening', 'structure', 'words', 'avoid', 'samples'],
-      rules: ['rules'], plan: ['title', 'coverText', 'facts', 'outline', 'cover', 'characters', 'images', 'shots', 'sources'] }[stage.kind]
+    const allowed = { article: ['article', 'sources', 'ruleChecks'], style: ['name', 'summary', 'tone', 'sentences', 'opening', 'structure', 'words', 'avoid', 'samples'],
+      rules: ['rules', 'ruleFiles', 'pendingReview'], plan: ['title', 'coverText', 'facts', 'outline', 'cover', 'characters', 'images', 'shots', 'sources'] }[stage.kind]
     if (!allowed || Object.keys(result).some(key => !allowed.includes(key))) throw failure('native/result-fields', 'Candidate contains unsupported fields', 400)
+    if (result.pendingReview !== undefined && (!Array.isArray(result.pendingReview) || result.pendingReview.length > 24
+      || result.pendingReview.some(text => typeof text !== 'string' || !text.trim() || text.length > 2000))) {
+      throw failure('native/rules-invalid', 'Pending review suggestions must be a separate bounded list', 400)
+    }
     if (result.sources !== undefined && (!Array.isArray(result.sources) || result.sources.length > 24 || result.sources.some(source => !source || typeof source.title !== 'string' || typeof source.reference !== 'string' || source.reference.length > 2000 || typeof source.date !== 'string' || typeof source.limitations !== 'string'))) throw failure('native/sources-invalid', 'Sources require title, reference, date and limitations', 400)
+  }
+
+  validateRuleFiles(state, files) {
+    for (const file of files) {
+      const row = state.skills.find(row => !row.sample && row.id === file.id)
+      if (!row?.content || row.content.status !== 'ready' || row.content.sha256 !== file.sha256
+        || createHash('sha256').update(this.store.notes.readBytesSync(row.content)).digest('hex') !== file.sha256) {
+        throw failure('native/rules-invalid', 'Rule file changed or was not registered; reread preferences and resolve ruleFileIssues')
+      }
+      validateRuleProposal(row)
+      if (row.relatedRuleId && !state.skills.some(other => !other.sample && other.id === row.relatedRuleId)) {
+        throw failure('native/rules-invalid', 'The related writing rule no longer exists; reread preferences')
+      }
+    }
   }
 
   async finish(sessionId, turn, { schedule = true } = {}) {
@@ -541,10 +614,19 @@ export class NativeWork {
         if (stage.kind === 'article' && (this.store.activeDraft ?? this.store.state).items.find(row => row.id === stage.workId)?.production?.attemptId !== stage.data.planId) {
           throw failure('native/plan-stale', 'The script belongs to another production plan')
         }
+        if (stage.kind === 'rules' && stage.ruleFiles) {
+          for (const file of stage.ruleFiles) {
+            const reference = (this.store.activeDraft ?? this.store.state).skills.find(row => row.id === file.id)?.content
+            if (!reference || createHash('sha256').update(this.store.notes.readBytesSync(reference)).digest('hex') !== file.sha256) {
+              throw failure('native/rules-invalid', 'Rule file changed before stage completion')
+            }
+          }
+        }
       }
       try {
         const candidate = stage.candidate ?? JSON.parse(await readFile(join(this.store.root, 'native-candidates', stage.id + '.json'), 'utf8'))
         if (hash(candidate) !== stage.candidateHash) throw failure('native/candidate-invalid', 'Retained native candidate changed')
+        if (stage.kind === 'rules') stage.ruleFiles = candidate.ruleFiles
         if (stage.status === 'save-failed') await this.store.mutate('重试原生成果保存', draft => {
           validate()
           const row = draft.nativeRequests.find(row => row.id === stage.id)
@@ -579,7 +661,7 @@ export class NativeWork {
       work.noteMetadata = { ...(work.noteMetadata ?? {}), sources: [{ ...(work.url ? { url: work.url } : {}), label: work.source ?? '' }, ...result.sources ?? []] }
       work.production ??= { cover: null, images: [], shots: [] }
       Object.assign(work.production, { article: result.article, aiArticle: result.article, current: true, sources: result.sources ?? [],
-        engine: stage.actualModels?.at(-1)?.model, nativeStageId: stage.id })
+        ruleChecks: result.ruleChecks ?? [], engine: stage.actualModels?.at(-1)?.model, nativeStageId: stage.id })
       for (const row of Object.values(work.drafts ?? {})) row.current = false
       if (['idea', 'outline'].includes(work.status)) work.status = 'draft'
     } else if (stage.kind === 'style') {
@@ -590,7 +672,21 @@ export class NativeWork {
       Object.assign(row, { source: stage.data.source, sourceUrls: stage.data.sourceUrls, sampleMaterial: stage.data.sampleMaterial })
       draft.activeStyleId = row.id
     } else if (stage.kind === 'rules') {
-      const applied = applyOps(draft, result.rules.map(rule => ({ op: 'add_skill', name: rule.name, rule: rule.rule, evidence: rule.evidence, source: '原生复盘', status: 'proposed' })))
+      const saved = draft.nativeRequests?.find(row => row.id === stage.id)
+      if (saved) saved.pendingReview = result.pendingReview ?? []
+      if (result.ruleFiles) {
+        this.validateRuleFiles(draft, result.ruleFiles)
+        if (saved) saved.ruleIds = result.ruleFiles.map(row => row.id)
+        return
+      }
+      const source = stage.data.learningSource
+      const proposals = result.rules.filter((rule, index, rules) => !draft.skills.some(existing => !existing.sample
+        && existing.rule.trim() === rule.rule.trim() && (existing.scope ?? '').trim() === (rule.scope ?? '').trim())
+        && rules.findIndex(other => other.rule.trim() === rule.rule.trim() && (other.scope ?? '').trim() === (rule.scope ?? '').trim()) === index)
+      for (const rule of proposals) if (rule.relatedRuleId && !draft.skills.some(row => !row.sample && row.id === rule.relatedRuleId)) throw failure('native/rules-invalid', 'The related writing rule no longer exists; reread preferences', 409)
+      const applied = applyOps(draft, proposals.map(rule => ({ op: 'add_skill', ...rule,
+        evidence: source ? `${source.title}\n${rule.evidence}` : rule.evidence,
+        source: source ? `${source.id} sha256 ${source.current.sha256}` : '原生复盘', status: 'proposed' })))
       if (applied.errors.length) throw failure('native/rules-invalid', applied.errors[0], 400)
     } else if (stage.kind === 'plan') this.ctx.mediaDesk.producer.acceptPlan(draft, stage)
   }
@@ -603,9 +699,10 @@ export class NativeWork {
       for (const row of draft.nativeRequests ?? []) if (row.workId === workId && active(row)) { row.status = 'cancelled' }
     }, { undoable: false })
     const sessionIds = stages.map(row => row.sessionId).filter(Boolean)
-    if (all) sessionIds.push(...this.sessions.associations.filter(row => row.workId === workId && row.active !== false).map(row => row.sessionId))
+    if (all) sessionIds.push(...this.sessions.associations.filter(row => row.workId === workId && row.active !== false && row.sessionId).map(row => row.sessionId))
     for (const sessionId of new Set(sessionIds)) {
       const resolved = await this.service('sessionController').resolveAgent(sessionId)
+      if (all && resolved.error?.code === 'session/not-found') continue
       if (resolved.error) throw resolved.error
       const owned = stages.some(row => row.sessionId === sessionId && row.turn !== undefined)
       if ((owned || all) && resolved.agent.status === 'running') { resolved.agent.cancel('user', { keepInbox: true }); if (wait) await resolved.agent.whenIdle() }

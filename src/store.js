@@ -17,6 +17,7 @@ import { LANGUAGE_FIELDS } from './notes.js'
 import { tr } from './i18n.js'
 import { HISTORY_LIMIT, unusedPath } from './notes-paths.js'
 import { pruneNotesHistory } from './notes-history.js'
+import { discoverRuleFiles } from './rule-files.js'
 
 const MAX_UNDO = 30
 const fingerprint = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -164,10 +165,27 @@ export class Store {
     await this.writes.recover()
     const next = structuredClone(this.state)
     const projected = await this.notes.hydrate(next)
+    const discovered = await discoverRuleFiles(this.notes, projected.skills ?? [], next.deletedRuleIds)
+    for (const rule of discovered.rules) {
+      const stored = { ...rule }
+      const row = structuredClone(rule)
+      ;(next.skills ??= []).unshift(stored)
+      ;(projected.skills ??= []).unshift(row)
+      await this.notes.hydrateManagedRow(next, stored, row, 'rule')
+      for (const field of this.notes.managedFields('rule')) delete stored[field]
+    }
+    if (next.contentRevisions) projected.contentRevisions = structuredClone(next.contentRevisions)
+    projected.ruleFileIssues = discovered.issues
     await this.notes.syncIndex(projected)
     await this.syncDerivedSkill?.(projected)
     if (!same(next, this.state)) {
-      await this.persist(next)
+      await this.persist(next, () => {
+        for (const rule of discovered.rules) {
+          if (fingerprint(this.notes.readBytesSync(rule.content)) !== rule.content.sha256) {
+            throw Object.assign(new Error(tr('规则文件在登记期间变化，请刷新后重试')), { code: 'notes/rule-conflict', status: 409 })
+          }
+        }
+      })
       this.state = next
     }
     return projected

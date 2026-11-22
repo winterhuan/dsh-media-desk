@@ -120,7 +120,7 @@ test('uses public batch execution and canonical value, imports image, never pass
     assert.deepEqual(Object.keys(batch).sort(), ['calls', 'signal'])
     const call = batch.calls[0]
     assert.equal(call.type, 'tool-call')
-    assert.match(call.id, /^media-desk:/)
+    assert.match(call.id, /^image-generation:/)
     assert.equal(call.name, 'image_generate')
     assert.deepEqual(JSON.parse(call.arguments), { prompt: 'paper boat', size: '1536x1024', quality: 'high' })
     assert.equal(batch.signal.aborted, false)

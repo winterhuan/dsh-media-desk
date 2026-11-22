@@ -17,4 +17,4 @@ function checkDirectory(directory) {
     if (result.status !== 0) process.exit(result.status ?? 1)
   }
 }
-for (const directory of ['src', 'scripts', 'test']) checkDirectory(resolve(root, directory))
+for (const directory of ['src', 'scripts', 'test', 'skills']) checkDirectory(resolve(root, directory))

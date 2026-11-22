@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概要
 
-通过 DSH 侧栏工作台收集灵感、直接编辑 Wiki Notes 中已登记的作品 Markdown、生成脚本与分镜并安排发布日历。每篇作品和全局助手都可使用持续的 DSH 原生会话与 Media Desk 创作 preset。生图使用单独的服务或兼容的已注册工具。发布仍由用户手动完成。
+通过 DSH 侧栏工作台收集灵感、直接编辑 Wiki Notes 中已登记的作品 Markdown、生成脚本与分镜并安排发布日历。每篇作品和全局助手都可使用持续的 DSH 原生会话与 Media Desk 创作 preset。全局生图 skill 通过选定服务或兼容的已注册工具执行图片生成。发布仍由用户手动完成。
 
 ## 目录
 
@@ -27,11 +27,31 @@ kind: "package-bundle"
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.12
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.13
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
 从侧栏打开「自媒体工作台」。安装包包含 Host 入口和浏览器产物。上游 npm 包与本 fork 共用面板 ID、路由和数据；同一个 profile 只启用其中一个。工作台状态和设置保存在 `<DSH_HOME>/media-desk/`，默认 home 为 `~/.dsh`；已登记的作品文字位于 Wiki Notes。[使用指南](GUIDE.zh.md)说明五个视图、原生输入、图片、恢复和文件导出。
+
+<a id="shared-skill"></a>
+### 共用 Media Desk skill
+
+[Media Desk skill](skills/media-desk/SKILL.md)围绕同一作品组织材料收集、研究、策划、成稿、改稿、图片、排期和复盘。插件阶段指令加载其业务参考。Agent 直接编辑内容文件，创作流程不按执行环境分叉。
+
+同一个 npm 包提供 `media-desk` CLI。`read` 返回登记信息和当前文件字节；`validate` 校验身份、格式及可选的预期指纹。两者都不写正文、快照、索引或回执。Agent 修复文件后再次校验。在包目录中先运行：
+
+```sh
+node scripts/media-desk-read.mjs --help
+```
+
+插件读取时投影已登记文件的有效修改，并自动将 `notes/preferences/rules/` 中有效的新规则文件登记为待审提案。CLI 可读取未登记提案，但不写入登记数据。启用仍需用户审阅；其他新内容登记、指标、排期和媒体接受由插件管理。[文件与 CLI 参考](skills/media-desk/references/runtime.md)说明格式、重复与无效文件处理、删除和当前限制。
+
+<a id="global-image-skill"></a>
+### 全局生图 skill
+
+独立的 [image-generation skill](skills/image-generation/SKILL.md)面向所有项目管理渠道选择、生成、编辑和视觉检查。将 `skills/image-generation` 链接到助手的全局技能目录。其 HTTP 脚本仅使用 Node 标准库，整个技能目录可脱离本包运行。内置 Codex 和明确指定的 Lupi 请求使用各自已安装技能。[HTTP 参考](skills/image-generation/references/http.md)说明独立配置、执行和回执。
+
+Media Desk 提供封面、配图与分镜要求并登记返回文件。插件后台任务把已有图片设置传给同一 skill 的 HTTP 或 DSH 工具脚本，每张图无需启动模型轮次解释技能。Session 编排、限流调度、媒体接受和保存恢复仍由插件负责。独立生图默认读取用户级全局 `.env` 的 IMAGE_URL 和 IMAGE_API_KEY，支持项目或调用方覆盖；优先顺序见 HTTP 参考。安装技能不会迁移凭据。
 
 <a id="native-conversations"></a>
 ### 原生会话
@@ -40,7 +60,7 @@ dsh --profile media-desk-dev --port 0 --no-open
 
 新关联使用现有的 `WIKI_PATH` 目录，未设置时使用 `~/wiki`。Host 配置 `wikiPath` 覆盖该选择。Wiki 同时确定工作区和 `<Wiki>/notes` 根目录；已登记作品的首个 Session 也沿用作品保存的 Wiki。环境变化后，作品和 Session 保留各自保存的根目录，包括使用符号链接的 Notes 目录。缺失的已保存 Wiki 不会被重建。修改原生工作区或 preset 后，需要恢复绑定的 Wiki 和 Media Desk preset，才能再次从工作台打开。
 
-原生 Session 选定的模型控制该会话。保存的助手模型偏好仅初始化新关联；原生模型变更作用于下一尚未准备的步骤。缺少原生服务、preset 或 Wiki 时会明确失败；现有关联保留供检查。继续现有会话时，保持相同的 DSH home 并恢复所需的 profile 组件。
+新 Session 使用 DSH 默认模型；设置中的旧工作台模型覆盖会被移除。现有 Session 保留原生模型选择，原生模型变更作用于下一尚未准备的步骤。模型不可用时仍可完成关联；成稿会提示先选择可用的原生模型再重试。缺少原生服务、preset 或 Wiki 时会明确失败；现有关联保留供检查。继续现有会话时，保持相同的 DSH home 并恢复所需的 profile 组件。
 
 <a id="notes-work-files"></a>
 ### Notes 作品文件
@@ -91,7 +111,7 @@ pnpm test
 
 本地开发使用 `dsh plugin --profile media-desk-dev add "link:$PWD"` 安装已构建的检出，再重启开发进程并硬刷新浏览器。
 
-上游源码使用 JavaScript。`typecheck` 检查 `src`、`scripts` 和 `test` 中的 JavaScript 语法，构建解析浏览器 JSX；这些命令不提供静态类型检查。构建产物 `dist/client.js` 随 Git 提交，使远程安装无需生命周期构建；浏览器源码变化后必须重新生成。保留 npm 锁文件供上游工作流使用，父仓库使用 pnpm。
+上游源码使用 JavaScript。`typecheck` 检查 `src`、`scripts`、`test` 和 `skills` 中的 JavaScript 语法，构建解析浏览器 JSX；这些命令不提供静态类型检查。构建产物 `dist/client.js` 随 Git 提交，使远程安装无需生命周期构建；浏览器源码变化后必须重新生成。保留 npm 锁文件供上游工作流使用，父仓库使用 pnpm。
 
 [原生运行时 fixture](test/fixtures/native-runtime.js)安装隔离的官方 Web profile，在临时 Wiki 上运行真实的 Loader、SessionController 和工具。模型适配器仅控制外部模型响应。[技能指令记录](test/fixtures/llm-wiki.instructions.json)标识固定的 `llm-wiki` 指令文件；不包含个人 Wiki 页面。
 
@@ -123,11 +143,11 @@ pnpm test
 
 #### 模型看到什么
 
-原生会话通过[创作上下文](src/native-context.js)接收创作 persona、绑定的作品或全局身份及 Wiki 路径、本地指令、当前时间和普通 Session 历史。preset 提供文件、搜索、Shell、技能、网页、问答、批准和压缩能力。实际生效的 `llm-wiki` 技能读取选中的页面与带日期的来源，不注入整个 Wiki。主题综合提供事实；只有选中的作者样文提供个人文风。此 preset 不包含编码、插件管理、定时、目标和委派工作流。
+原生会话通过[创作上下文](src/native-context.js)接收创作 persona、绑定的作品或全局身份及 Wiki 路径、本地指令、当前时间和普通 Session 历史。preset 提供文件、搜索、Shell、技能、网页、问答、批准和压缩能力。实际生效的 `llm-wiki` 技能读取选中的页面与带日期的来源，不注入整个 Wiki。主题综合提供事实；只有选中的作者样文提供个人文风。此 preset 不包含编码、插件管理、定时、目标和委派工作流。 单篇规则学习比较已保存正文、固定 AI 原稿与可选修改反馈；缺少修改总结不阻止比较。提案保留依据、适用范围、示例和相近规则引用供审阅；同文同范围的重复规则跳过。成稿读取冻结偏好，接受正文前要求逐条检查启用规则。Host 校验检查覆盖与字段，语义符合仍由写作助手判断。
 
 #### Token 影响
 
-普通 Session 历史、加载的技能指令和选中文件内容会增加输入 Token。Wiki 研究加载相关查询指令与命中页面，不读取所有页面。
+共用 skill 入口常驻创作上下文，阶段仅加载制作或学习参考；其他参考按需读取。普通 Session 历史、加载的技能指令和选中文件内容会增加输入 Token。Wiki 研究加载相关查询指令与命中页面，不读取所有页面。
 
 #### KV Cache 影响
 
@@ -152,9 +172,9 @@ pnpm test
 <a id="known-limitations-and-deferred-work"></a>
 
 - 兼容范围固定为完整的 DSH `0.2.2-rc.1` Web profile。排期不向平台发布，整体成稿完成时仍可能存在失败图片，Host 中断的任务需要重新成稿。使用同一 DSH home 的 profile 共享工作台数据和关联。
-- 全部文字入口使用原生 Session。语法／构建检查和可控模型 fixture 不证明真实模型质量、付费图片服务可用性或订阅登录；本机验收记录说明实际模型与浏览器结果。
+- 插件生成使用原生 Session；Agent 直接修改内容，npm CLI 只读取和校验。语法／构建检查和可控模型 fixture 不证明真实模型质量、付费图片服务可用性或订阅登录；本机验收记录说明实际模型与浏览器结果。
 - 未发送附件保留在 DSH 浏览器运行时，硬刷新后需重新添加；刷新前可先发送。已发送附件历史与已保存文字草稿由 DSH 管理。
-- 中断或失败的原生创建保留待建立状态。通过 `/media-desk/sessions` 或 `<DSH_HOME>/media-desk/sessions.json` 检查错误及已取得的实际 Session ID。不提供自动替代会话或待建立状态恢复。
+- 中断或失败的原生创建保留待建立状态。**重试建立关联**校验并绑定已记录的 Session，不发送输入或替换其历史。尚未记录 Session ID 时，使用**开始新对话**。通过 `/media-desk/sessions` 或 `<DSH_HOME>/media-desk/sessions.json` 检查保留的错误与身份。
 - 迁移保留旧作品文字、草稿、固定 AI 原稿、已保存语言、收藏材料和可编辑写作偏好。已接受媒体使用 `notes/assets/<work-title>/`；敏感的提供方设置与原始指标仍位于 Notes 外。重叠的逆向编辑需要先修复冲突；撤销失败保留记录。任务候选须通过所属任务校验，重试保存才可接受。
 - 协作锁仅覆盖同机本地 Host，普通编辑器不参与。保留的编辑器句柄可在接受后继续修改移出的文件；后续读取保留双方版本并报告冲突。Notes 发布与 Store 接受分步执行，使用恢复日志，不构成文件系统事务。DSH 可在五秒关闭超时后强制退出，即使启动器退出码为零，成稿也可能仍处于中断状态。
 

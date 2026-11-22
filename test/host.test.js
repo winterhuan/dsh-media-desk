@@ -282,7 +282,7 @@ test('风格：只留白名单字段，能变成写作要求，并进入提示�
   assert.match(styleToVoice(style), /常用词：那天/)
   assert.equal(normalizeStyle(null, '备用').name, '备用')
   assert.equal(styleToVoice(null), '')
-  assert.match(stylePrompts('素材', '').system, /文风分析师/)
+  assert.match(stylePrompts('素材', '').system, /Observe the selected author sample/)
 
   const state = seed()
   const item = state.items[0]

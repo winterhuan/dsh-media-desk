@@ -9,23 +9,29 @@
   en: 2db07af5a1dca740
   zh: 2ca863a3854c142e
 /winterhuan-dsh-media-desk/summary:
-  en: 2189a69307fb76ad
-  zh: ec53b758d2cd9951
+  en: 274932253b24a89f
+  zh: 1c39078566eb713b
 /winterhuan-dsh-media-desk/table-of-contents:
   en: d82a25774fdda2a7
   zh: 74a5455dea14a89f
 /winterhuan-dsh-media-desk/use-this-package:
-  en: ba26fd602e285d14
-  zh: b6ca53c20275853d
+  en: 89e6b27f4ee255bd
+  zh: 313e05309948cd23
+/winterhuan-dsh-media-desk/use-this-package/shared-media-desk-skill:
+  en: d87caadb2e91e813
+  zh: e4ec23ab8d8856ed
+/winterhuan-dsh-media-desk/use-this-package/global-image-skill:
+  en: 49e13d7e8eb426a8
+  zh: 60f462e735cc73db
 /winterhuan-dsh-media-desk/use-this-package/native-conversations:
-  en: f798f07f43006a99
-  zh: 5383ca036a5a5a52
+  en: 357cf6855af918e7
+  zh: 768782d113a33574
 /winterhuan-dsh-media-desk/use-this-package/notes-work-files:
   en: 53441b7fa7998705
   zh: bb82647c7739ca7f
 /winterhuan-dsh-media-desk/development:
-  en: 017c8f621eac0371
-  zh: c7499c6734536f98
+  en: 416fba46b1e4055b
+  zh: 25928e546e547490
 /winterhuan-dsh-media-desk/understand-the-implementation:
   en: 6be0706c61e127e0
   zh: 84248661890dfdd8
@@ -39,11 +45,11 @@
   en: b63f1ce79bd3156a
   zh: 5d25e5ddb7a05f4a
 /winterhuan-dsh-media-desk/model-experience/native-creative-context/what-the-model-sees:
-  en: 66c4d849f423ea8d
-  zh: 954c5497cad86f31
+  en: fc83183eadb30b14
+  zh: b50a19351d24bf7d
 /winterhuan-dsh-media-desk/model-experience/native-creative-context/token-effect:
-  en: 6e67b4bf19017eab
-  zh: e5839a2fd058c15a
+  en: dbc60b0e041ec246
+  zh: 2e40b88daf82e7ba
 /winterhuan-dsh-media-desk/model-experience/native-creative-context/kv-cache-effect:
   en: 7a261ff7069f9ff8
   zh: a0341137ffa74728
@@ -60,8 +66,8 @@
   en: 9095df0a98b9f267
   zh: 9e7f343181e1ed48
 /winterhuan-dsh-media-desk/known-limitations-and-deferred-work:
-  en: dd47c8a68e741c70
-  zh: 99d6e5611cf386f1
+  en: 88b5ed2b4a6c7c26
+  zh: ce758600f4d654c3
 /winterhuan-dsh-media-desk/known-limitations-and-deferred-work/dev-note:
   en: 0a1253c6f7b5e8b9
   zh: 9f56528562c7c914

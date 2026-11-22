@@ -416,7 +416,12 @@ test('原生成稿读取冻结的自定义语气、风格和启用规则，外�
   const added = await runtime.host('ops', { ops: [{ op: 'add_style', name: 'Frozen custom style', tone: 'Original custom tone.' }, { op: 'add_skill', name: 'Enabled rule', rule: 'Original enabled rule.', status: 'active' }, { op: 'add_skill', name: 'Disabled rule', rule: 'Never use this disabled rule.', status: 'disabled' }] })
   assert.equal(added.status, 200, JSON.stringify(added.value))
   const style = added.value.state.styles.find(row => row.name === 'Frozen custom style')
+  const rule = added.value.state.skills.find(row => row.name === 'Enabled rule')
+  recipes.MD_STAGE_article.calls[1].arguments.result = JSON.stringify({ article: 'Accepted frozen-preference script.', sources: [],
+    ruleChecks: [{ id: rule.id, status: 'pass', reason: 'The script follows the frozen enabled rule.' }] })
   await runtime.host('ops', { ops: [{ op: 'set_style', id: style.id }] })
+  await runtime.stop()
+  await runtime.start()
   await runtime.host('produce', { id: 'seed_2' })
   const deadline = Date.now() + 30000
   for (;;) {

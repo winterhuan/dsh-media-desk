@@ -1,6 +1,6 @@
 /** The official conversation factory renders tool cards, approval, questions and native input. */
 import React from 'react'
-import { openNativeSession, newNativeConversation, report, setDesk, useDesk } from './desk.js'
+import { openNativeSession, newNativeConversation, retryNativeSession, report, setDesk, useDesk } from './desk.js'
 import { t } from './i18n.js'
 import { IconButton } from './ui.jsx'
 
@@ -15,13 +15,15 @@ export function ChatPanel({ itemId = null, head, top, retainSession, SessionProv
   React.useEffect(() => {
     let alive = true
     const token = ++generation.current
+    setError(null)
+    setRestarting(false)
     openNativeSession(itemId).then(association => {
       if (!alive || generation.current !== token) return
       const reference = retainSession(association.sessionId)
       referenceRef.current = reference
       setBinding({ itemId, association, reference })
       setError(null)
-    }).catch(error => { if (alive) setError(error.message) })
+    }).catch(error => { if (alive && generation.current === token) setError(error) })
     return () => { alive = false; generation.current++;  referenceRef.current?.release(); referenceRef.current = null }
   }, [itemId, retainSession])
   React.useEffect(() => {
@@ -30,23 +32,29 @@ export function ChatPanel({ itemId = null, head, top, retainSession, SessionProv
     const text = (quote.text ? `${quote.label}:\n${quote.text}` : quote.label) + selection
     if (initializeDraft(binding.reference, text) === 'applied') setDesk({ chatQuote: null })
   }, [binding, quote, itemId, initializeDraft])
-  const restart = async () => {
+  const restart = async (retry = false) => {
     const token = ++generation.current
     setRestarting(true)
     try {
-      const association = await newNativeConversation(itemId)
+      const association = await (retry ? retryNativeSession(itemId) : newNativeConversation(itemId))
       if (generation.current !== token) return
       const reference = retainSession(association.sessionId)
       referenceRef.current?.release()
       referenceRef.current = reference
       setBinding({ itemId, association, reference })
-    } catch (error) { if (generation.current === token) report(error) }
+      setError(null)
+    } catch (error) {
+      if (generation.current === token) {
+        if (retry) setError(previous => Object.assign(error, { canRetry: previous?.canRetry }))
+        report(error)
+      }
+    }
     finally { if (generation.current === token) setRestarting(false) }
   }
   return <div className="md-chat">
-    <header className="md-dock-head">{head}<IconButton icon="refresh" label={t('开始新对话')} disabled={restarting} onClick={restart} /></header>
+    <header className="md-dock-head">{head}<IconButton icon="refresh" label={t('开始新对话')} disabled={restarting} onClick={() => restart()} /></header>
     {top}
-    {error ? <p className="md-msg-error" role="status">{error}</p> : binding?.itemId === itemId ? <SessionProvider session={binding.reference}>{renderSlot('media-desk.conversation', {})}</SessionProvider> : <div className="md-loading" aria-busy="true" />}
+    {error ? <div role="status"><p className="md-msg-error">{error.message}</p>{error.canRetry ? <button type="button" className="md-btn is-small" disabled={restarting} onClick={() => restart(true)}>{t('重试建立关联')}</button> : null}</div> : binding?.itemId === itemId ? <SessionProvider session={binding.reference}>{renderSlot('media-desk.conversation', {})}</SessionProvider> : <div className="md-loading" aria-busy="true" />}
   </div>
 }
 

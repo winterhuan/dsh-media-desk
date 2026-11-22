@@ -1,15 +1,5 @@
-/** Initial model preferences and cover text formatting; execution belongs to native Sessions. */
+/** DSH default model display and cover text formatting; execution belongs to native Sessions. */
 import { currentLang } from './i18n.js'
-
-let assistantOverride = null
-
-export function setAssistantModel(sel) {
-  assistantOverride = sel?.provider && sel?.model ? { provider: sel.provider, model: sel.model } : null
-}
-
-export function assistantModelOverride() {
-  return assistantOverride
-}
 
 export function defaultSelection(ctx) {
   try {
@@ -22,7 +12,7 @@ export function defaultSelection(ctx) {
 
 export function modelInfo(ctx) {
   if (!ctx.get('llm')) return null
-  const route = assistantOverride ?? defaultSelection(ctx)
+  const route = defaultSelection(ctx)
   if (!route) return null
   return { provider: route.provider, model: route.model, label: route.model }
 }

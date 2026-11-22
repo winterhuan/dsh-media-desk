@@ -37,7 +37,12 @@ async function ownedFixture(t, { article = false } = {}) {
     resolveAgent: async () => ({ agent: { model: { current: () => ({ provider: 'fixture', model: 'fixture' }) } } }),
     prompt: async request => { dispatched.push(request); return { accepted: true } },
   }
-  const sessions = { open: async () => association, service: name => { assert.equal(name, 'sessionController'); return controller } }
+  const llm = { listProviders: () => [{ id: 'fixture' }], listModels: async () => [{ id: 'fixture' }] }
+  const sessions = { open: async () => association, service: name => {
+    if (name === 'llm') return llm
+    assert.equal(name, 'sessionController')
+    return controller
+  } }
   const ctx = { mediaDesk: { settings: { read: async () => settings } } }
   const native = new NativeWork(ctx, store, sessions)
   producer = new Producer({ store, settings: ctx.mediaDesk.settings, native, ready: () => false })
