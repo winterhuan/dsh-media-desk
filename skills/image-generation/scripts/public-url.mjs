@@ -31,4 +31,3 @@ export async function assertPublicUrl(raw, translate = text) {
   if (records.some(record => isPrivateAddress(record.address))) throw new Error(tr('不能抓取内网地址'))
   return url
 }
-

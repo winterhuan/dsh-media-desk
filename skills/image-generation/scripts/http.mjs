@@ -183,4 +183,3 @@ export async function generateImage(image, prompt, { fetchImpl = fetch, signal, 
   const message = lastError.name === 'TimeoutError' ? tr('生图超时，可以重试') : isUrlError(lastError) ? tr('图片地址不对：{reason}', { reason: redact(lastError.message, image.apiKey) }) : lastError.name === 'TypeError' ? tr('连不上生图服务：{reason}', { reason: redact(lastError.cause?.code ?? lastError.message, image.apiKey) }) : redact(lastError.message, image.apiKey)
   throw new Error(message)
 }
-
