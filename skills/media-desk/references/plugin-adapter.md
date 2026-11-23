@@ -1,10 +1,10 @@
 # 插件执行适配
 
-插件兼容执行层随 Media Desk 包提供 `scripts/media-desk.mjs`；技能入口转调同包的 CLI，复用 Store、Notes、Settings、MediaFiles 和保存回执。需要 Node >=22.19 与已安装依赖的包。无需启动 DSH 服务即可 standalone 执行；同一个 data home 与 Wiki 的插件启动后直接读回。
+插件兼容执行层随 Media Desk 包提供 `scripts/media-desk.mjs`，复用 Store、Notes、Settings、MediaFiles 和保存回执。技能目录中的 `scripts/media-desk.mjs` 与 npm 命令只提供读取和校验；业务操作使用包根目录下的执行适配。需要 Node >=22.19 与已安装依赖的包。无需启动 DSH 服务即可 standalone 执行；同一个 data home 与 Wiki 的插件启动后直接读回。
 
 ```sh
-node /absolute/skills/media-desk/scripts/media-desk.mjs read --mode standalone --home /absolute/dsh-home --wiki /absolute/wiki --input /absolute/read.json
-node /absolute/skills/media-desk/scripts/media-desk.mjs commit --mode plugin --input /absolute/commit.json --login-log /absolute/live.log
+node /absolute/media-desk-package/scripts/media-desk.mjs read --mode standalone --home /absolute/dsh-home --wiki /absolute/wiki --input /absolute/read.json
+node /absolute/media-desk-package/scripts/media-desk.mjs commit --mode plugin --input /absolute/commit.json --login-log /absolute/live.log
 ```
 
 默认 home 为 DSH_HOME 或 ~/.dsh/profiles/media/data，Wiki 为 WIKI_PATH 或 ~/wiki。本机日常 plugin 的地址为 http://127.0.0.1:3085。认证从指定实时日志或 MEDIA_DESK_LOGIN_URL 读取，令牌不写入输出。不同 profile 显式传 URL 和日志。auto 在可认证 Host 上运行；显式 home 选择离线数据，不自动切去另一 profile。旧发布包不含 skill 接口时报版本缺口，不绕开校验。
