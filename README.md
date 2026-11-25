@@ -23,11 +23,11 @@ Capture ideas, edit registered work Markdown directly in Wiki Notes, produce scr
 <a id="use-this-package"></a>
 ## Use this package
 
-Install the fixed Git release into a separate DSH `0.2.2-rc.1` Web profile and open the URL printed by DSH. The release includes the built browser entry:
+Install the fixed Git release into a separate DSH `0.2.2-rc.5` Web profile and open the URL printed by DSH. The release includes the built browser entry:
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.14
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.15
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
@@ -171,7 +171,7 @@ The plugin does not manage a KV cache. Repeated prompt prefixes may be reused by
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- Compatibility is pinned to the complete DSH `0.2.2-rc.1` Web profile. Scheduling does not publish to platforms, image failures can coexist with a completed production, and interrupted Host jobs require restarting production. Profiles using the same DSH home share workbench data and associations.
+- Compatibility is pinned to the complete DSH `0.2.2-rc.5` Web profile. Scheduling does not publish to platforms, image failures can coexist with a completed production, and interrupted Host jobs require restarting production. Profiles using the same DSH home share workbench data and associations.
 - Plugin generation uses native Sessions; the Agent edits content directly and the npm CLI only reads and validates. Syntax/build checks and controlled-model fixtures do not establish real model quality, paid image-service availability or subscription sign-in. The local acceptance record states the observed real model and browser results.
 - Unsent attachments stay in the DSH browser runtime and do not survive a hard refresh; send them first or add them again. DSH manages sent attachment history and saved text drafts.
 - Interrupted or failed native creation stays pending. **Retry session binding** validates and binds the recorded Session without sending input or replacing its history. Without a recorded Session ID, use **Start a new conversation**. Inspect `/media-desk/sessions` or `<DSH_HOME>/media-desk/sessions.json` for retained errors and identities.

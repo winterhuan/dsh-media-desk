@@ -23,11 +23,11 @@ kind: "package-bundle"
 <a id="use-this-package"></a>
 ## 使用此包
 
-将固定 Git 发布包安装到独立的 DSH `0.2.2-rc.1` Web profile，再打开 DSH 输出的地址。发布包包含已构建的浏览器入口：
+将固定 Git 发布包安装到独立的 DSH `0.2.2-rc.5` Web profile，再打开 DSH 输出的地址。发布包包含已构建的浏览器入口：
 
 ```sh
 dsh --profile media-desk-dev --from-default-profile web --dump-config
-dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.14
+dsh plugin --profile media-desk-dev add github:winterhuan/dsh-media-desk#v2.7.0-winter.15
 dsh --profile media-desk-dev --port 0 --no-open
 ```
 
@@ -171,7 +171,7 @@ pnpm test
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- 兼容范围固定为完整的 DSH `0.2.2-rc.1` Web profile。排期不向平台发布，整体成稿完成时仍可能存在失败图片，Host 中断的任务需要重新成稿。使用同一 DSH home 的 profile 共享工作台数据和关联。
+- 兼容范围固定为完整的 DSH `0.2.2-rc.5` Web profile。排期不向平台发布，整体成稿完成时仍可能存在失败图片，Host 中断的任务需要重新成稿。使用同一 DSH home 的 profile 共享工作台数据和关联。
 - 插件生成使用原生 Session；Agent 直接修改内容，npm CLI 只读取和校验。语法／构建检查和可控模型 fixture 不证明真实模型质量、付费图片服务可用性或订阅登录；本机验收记录说明实际模型与浏览器结果。
 - 未发送附件保留在 DSH 浏览器运行时，硬刷新后需重新添加；刷新前可先发送。已发送附件历史与已保存文字草稿由 DSH 管理。
 - 中断或失败的原生创建保留待建立状态。**重试建立关联**校验并绑定已记录的 Session，不发送输入或替换其历史。尚未记录 Session ID 时，使用**开始新对话**。通过 `/media-desk/sessions` 或 `<DSH_HOME>/media-desk/sessions.json` 检查保留的错误与身份。
