@@ -3,7 +3,7 @@
 import { parseArgs } from 'node:util'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { readFile, readdir, writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { WriteOwner } from '../src/write-owner.js'
@@ -16,21 +16,11 @@ import { SkillDesk } from '../src/skill-desk.js'
 import { generateImage } from '../src/images.js'
 import { exportSkill } from '../src/learn.js'
 import { withLang } from '../src/i18n.js'
+import { readLoginUrl, resolveHostTarget } from '../src/cli-target.js'
 
 async function loginUrl(base, logFile) {
+  if (logFile) return readLoginUrl(logFile, base)
   if (process.env.MEDIA_DESK_LOGIN_URL) return process.env.MEDIA_DESK_LOGIN_URL
-  let logs = logFile ? [resolve(logFile)] : []
-  if (!logs.length && base === 'http://127.0.0.1:3085') {
-    const dir = join(homedir(), '.dsh/installations/dsh-media/.artifacts')
-    try { logs = (await readdir(dir)).filter(name => /^dsh-media-.*\.log$/.test(name)).sort().reverse().slice(0, 1).map(name => join(dir, name)) }
-    catch (error) { if (error.code !== 'ENOENT') throw error }
-  }
-  for (const file of logs) {
-    const text = await readFile(file, 'utf8')
-    const urls = text.match(/https?:\/\/[^\s]+\/\?token=[A-Za-z0-9_-]+/g) ?? []
-    const matching = urls.filter(url => new URL(url).origin === new URL(base).origin)
-    if (matching.length) return matching.at(-1)
-  }
   return null
 }
 
@@ -86,7 +76,7 @@ async function offline(home, wiki, action, args) {
 export async function main(argv = process.argv.slice(2)) {
   const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
     mode: { type: 'string', default: 'auto' }, home: { type: 'string' }, wiki: { type: 'string' },
-    url: { type: 'string', default: 'http://127.0.0.1:3085' }, 'login-log': { type: 'string' },
+    url: { type: 'string' }, profile: { type: 'string' }, 'login-log': { type: 'string' },
     input: { type: 'string' }, out: { type: 'string' }, lang: { type: 'string', default: 'zh' }, help: { type: 'boolean' },
   } })
   if (values.help || !positionals.length) {
@@ -95,19 +85,19 @@ export async function main(argv = process.argv.slice(2)) {
   }
   if (!['auto', 'standalone', 'plugin'].includes(values.mode)) throw new Error('mode must be auto, standalone or plugin')
   const args = values.input ? JSON.parse(await readFile(resolve(values.input), 'utf8')) : {}
-  const home = resolve(values.home ?? process.env.DSH_HOME ?? join(homedir(), '.dsh/profiles/media/data'))
+  const home = resolve(values.home ?? process.env.DSH_HOME ?? join(homedir(), process.platform === 'win32' ? '.dsh' : '.dsh/profiles/media/data'))
   const wiki = resolve(values.wiki ?? process.env.WIKI_PATH ?? join(homedir(), 'wiki'))
-  process.env.DSH_HOME = home
   const action = positionals[0]
   let api
   // An explicit offline directory never falls through to a different running profile.
-  if (values.mode !== 'standalone' && (!values.home && !values.wiki || values.mode === 'plugin')) {
-    try { api = await connect(values.url.replace(/\/+$/, ''), values['login-log'], values.lang) }
-    catch (error) { if (values.mode === 'plugin' || !['ECONNREFUSED', 'UND_ERR_CONNECT_TIMEOUT'].includes(error.cause?.code)) throw error }
+  if (values.mode !== 'standalone' && (!values.home && !values.wiki || values.mode === 'plugin' || values.url || values.profile || values['login-log'])) {
+    const target = await resolveHostTarget(values)
+    api = await connect(target.base, target.logFile, values.lang)
+    if (!api) throw new Error('No live login URL found; set --login-log or MEDIA_DESK_LOGIN_URL. Offline use requires --mode standalone')
   }
-  if (values.mode === 'plugin' && !api) throw new Error('No live login URL found; set --login-log or MEDIA_DESK_LOGIN_URL')
   if (action === 'api' && !api) throw new Error('Native Session and Host-only actions require plugin mode')
   if (action === 'api' && (!/^[\w/-]+(?:\?[^#]*)?$/.test(args.path ?? '') || args.path.includes('..'))) throw new Error('Invalid API path')
+  if (!api) process.env.DSH_HOME = home
   const result = await withLang(values.lang, () => api ? (action === 'api' ? api(args.path, args.body) : api('skill', { action, args })) : offline(home, wiki, action, args))
   const text = JSON.stringify(result ?? { saved: true }, null, 2)
   if (values.out || text.length > 12000) {

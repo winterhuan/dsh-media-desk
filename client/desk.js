@@ -6,9 +6,9 @@ import { lang, plural, setLanguagePreference, t } from './i18n.js'
 const BASE = 'media-desk/'
 
 let snapshot = {
-  state: null, model: null, modelOk: null, modelError: null, canUndo: false, undoId: null, error: null,
+  state: null, canUndo: false, undoId: null, error: null,
   view: 'home', mode: 'scatter', focusId: null, sheetOrigin: null, dockOpen: true, studioDock: false, chatQuote: null, query: '', kindFilter: 'all', related: null,
-  live: {}, settings: null, settingsOpen: false, notesRecovery: false, thinking: false, toast: null, capture: null, dialog: null,
+  live: {}, settings: null, settingsOpen: false, notesRecovery: false, toast: null, capture: null, dialog: null,
 }
 const listeners = new Set()
 
@@ -56,7 +56,7 @@ export async function loadDesk() {
     const settings = await request('settings')
     setLanguagePreference(settings.language)
     const data = await request('state')
-    setDesk({ settings, state: data.state, model: data.model, modelOk: data.modelOk, modelError: data.modelError, canUndo: data.canUndo, undoId: data.undoId, error: null })
+    setDesk({ settings, state: data.state, canUndo: data.canUndo, undoId: data.undoId, error: null })
   } catch (err) {
     setDesk({ error: err.message })
   }
@@ -304,15 +304,6 @@ export async function revealSaved(id) {
   }
 }
 
-export async function clearChat() {
-  try {
-    const data = await request('chat/clear', {})
-    setDesk({ state: data.state })
-  } catch (err) {
-    report(err)
-  }
-}
-
 export async function captureUrl(url, extra = {}) {
   try {
     const data = await request('capture-url', { url, ...extra })
@@ -378,12 +369,6 @@ export async function exportSkills() {
     report(err)
   }
 }
-
-export function fetchInsights() {
-  return request('insights')
-}
-
-
 
 /** Poll accepted Host data while the workbench is visible, including asynchronous global edits. */
 export function watchDesk() {

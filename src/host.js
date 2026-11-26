@@ -42,7 +42,9 @@ function json(res, status, body) {
   res.statusCode = status
   res.setHeader('content-type', 'application/json; charset=utf-8')
   res.setHeader('cache-control', 'no-store')
-  res.end(JSON.stringify(body))
+  // Derive from the same accepted snapshot, in the Host's timezone, without another storage read.
+  const payload = body?.state ? { ...body, state: { ...body.state, insights: computeInsights(body.state) } } : body
+  res.end(JSON.stringify(payload))
 }
 
 async function jsonState(res, store, result) {

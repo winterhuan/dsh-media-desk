@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import WebSocket from 'ws'
+import { dshEntry } from './dsh-command.js'
 
 const execute = promisify(execFile)
 const repository = fileURLToPath(new URL('../../', import.meta.url))
@@ -20,6 +21,7 @@ const profile = 'media-desk-test'
  * @returns {Promise<object>} Fixture with Host and native RPC callers, restart and cleanup.
  */
 export async function nativeRuntime(t, options = {}) {
+  const cli = await dshEntry()
   const root = await mkdtemp(join(tmpdir(), 'media-desk-native-'))
   const wiki = join(root, 'wiki')
   const home = options.env?.DSH_HOME ?? join(root, 'home')
@@ -45,7 +47,8 @@ export async function nativeRuntime(t, options = {}) {
       if (!child) return
       const current = child
       let timedOut = false
-      current.kill(signal)
+      if (process.platform === 'win32' && signal === 'SIGTERM' && current.connected) current.send('media-desk-fixture-stop')
+      else current.kill(signal)
       const deadline = setTimeout(() => { timedOut = true; current.kill('SIGKILL') }, options.stopTimeoutMs ?? 8000)
       try {
         const result = await exited
@@ -68,22 +71,24 @@ export async function nativeRuntime(t, options = {}) {
   await Promise.all([mkdir(wiki), mkdir(agents), mkdir(join(root, 'documents'))])
   await cp(fileURLToPath(new URL('./llm-wiki', import.meta.url)), join(agents, 'skills', 'llm-wiki'), { recursive: true })
   await writeFile(join(wiki, 'AGENTS.md'), 'Use the llm-wiki skill. Keep source dates and uncertainty.\n')
-  const dsh = (...args) => execute('dsh', args, { cwd: wiki, env, timeout: 60000, maxBuffer: 8 * 1024 * 1024 })
+  const dsh = (...args) => execute(process.execPath, [cli, ...args], { cwd: wiki, env, timeout: 60000, maxBuffer: 8 * 1024 * 1024, windowsHide: true })
   await dsh('--profile', profile, '--from-default-profile', 'web', '--dump-config')
   await dsh('plugin', '--profile', profile, 'add', 'link:' + repository)
 
   const start = async (patch = [], environment = {}) => {
     if (child || stopping) throw new Error('Stop the fixture before restarting it')
     await writeFile(overlay, JSON.stringify([
+      { id: 'hmr', disabled: true },
       { id: 'agent-default-model', config: { provider: 'media-desk-fixture', model: 'native-fixture' } },
       { id: 'workspace-controller', config: { documentsDirectory: join(root, 'documents') } },
       { insert: [{ id: 'media-desk-model-fixture', name: model, config: { recipes: options.recipes ?? {}, telemetryPath } }] },
+      ...(process.platform === 'win32' ? [{ insert: [{ id: 'media-desk-stop-fixture', name: fileURLToPath(new URL('./windows-stop.js', import.meta.url)) }] }] : []),
       ...patch,
     ]))
     log = ''
     const port = options.reusePort && baseUrl ? new URL(baseUrl).port : '0'
-    child = spawn('dsh', ['--profile', profile, '--patch', overlay, '--host', '127.0.0.1', '--port', port, '--no-open'], {
-      cwd: wiki, env: { ...env, ...environment }, stdio: ['ignore', 'pipe', 'pipe'],
+    child = spawn(process.execPath, [cli, '--profile', profile, '--patch', overlay, '--host', '127.0.0.1', '--port', port, '--no-open'], {
+      cwd: wiki, env: { ...env, ...environment }, stdio: ['ignore', 'pipe', 'pipe', ...(process.platform === 'win32' ? ['ipc'] : [])], windowsHide: true,
     })
     const current = child
     exited = new Promise((resolve, reject) => {

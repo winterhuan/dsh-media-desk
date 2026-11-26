@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { applyOps } from '../src/ops.js'
+import { computeInsights } from '../src/learn.js'
 import { hostRuntime } from './fixtures/host-runtime.js'
 
 async function openDesk(t) {
@@ -29,6 +30,26 @@ async function openDesk(t) {
   }
   return { desk: runtime.ctx.get('mediaDesk'), get }
 }
+
+test('状态响应在同一次读取中附带复盘汇总，并跟随指标和账号更新', async t => {
+  const { desk, get } = await openDesk(t)
+  await get('state') // Complete initial sample localization before measuring reads.
+  const observer = t.mock.method(desk.store, 'read')
+  const before = (await get('state')).state
+  assert.equal(observer.mock.callCount(), 1)
+  observer.mock.restore()
+  assert.deepEqual(before.insights, computeInsights(before))
+  await desk.store.mutate('Record metrics', draft => {
+    draft.metrics = [{ itemId: 'seed_2', platform: 'fixture', date: '2026-11-25T23:30:00Z', views: 120, likes: 12 }]
+    draft.accounts = [{ followers: 45 }]
+  })
+  const after = (await get('state')).state
+  assert.deepEqual(after.insights, await get('insights'))
+  assert.equal(after.insights.views, 120)
+  assert.equal(after.insights.followers, 45)
+  assert.equal(after.insights.engagementRate, 0.1)
+  assert.equal((await desk.store.read()).insights, undefined)
+})
 
 test('复盘等待并发编辑结算，嵌套读取仍使用当前草稿', async t => {
   const { desk, get } = await openDesk(t)

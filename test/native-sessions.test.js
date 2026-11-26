@@ -5,6 +5,8 @@ import { mkdir, realpath, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { nativeRuntime } from './fixtures/native-runtime.js'
 
+const shell = process.platform === 'win32' ? 'pwsh' : 'bash'
+
 test('作品和全局助手分别复用已绑定的原生 Session 与 Wiki 工作区', { timeout: 180000 }, async t => {
   const runtime = await nativeRuntime(t)
   await runtime.start()
@@ -98,7 +100,7 @@ test('创建未完成时保留实际 Session 身份供检查，重复打开不�
 test('原生问答和批准由所属全局 Session 等待、接收并保存完整工具结果', { timeout: 180000 }, async t => {
   const recipes = { MD_FIXTURE_INTERACTIONS: { calls: [
     { name: 'ask_user_question', arguments: { questions: [{ id: 'direction', header: 'Direction', question: 'How should the work cite its sources?', options: [{ label: 'Evidence first', description: 'Retain the dated evidence.' }, { label: 'Brief', description: 'Use a brief citation.' }] }] } },
-    { name: 'bash', arguments: { description: 'Save an explicitly approved fixture observation', command: "printf 'approved native observation\\n' > approved.txt", timeoutMs: 10000, run_in_background: false, sandbox_permissions: 'danger-full-access', justification: 'Save the fixture observation after this native approval.' } },
+    { name: shell, arguments: { description: 'Save an explicitly approved fixture observation', command: process.platform === 'win32' ? '[IO.File]::WriteAllText((Join-Path (Get-Location) "approved.txt"), "approved native observation`n")' : "printf 'approved native observation\\n' > approved.txt", timeoutMs: 10000, run_in_background: false, sandbox_permissions: 'danger-full-access', justification: 'Save the fixture observation after this native approval.' } },
   ], reply: 'Native question and approved command completed.' } }
   const runtime = await nativeRuntime(t, { recipes, env: { DSH_PERMISSION_MODE: 'workspace-write' } })
   await runtime.start()
@@ -113,7 +115,7 @@ test('原生问答和批准由所属全局 Session 等待、接收并保存完�
   assert.ok(waitingQuestion.value.pendingInput.includes('question'))
   await interactions.answer(question, { answers: [{ id: 'direction', selected: ['Evidence first'] }] })
   const approval = await interactions.next('approval/request', sessionId)
-  assert.equal(approval.request.toolName, 'bash')
+  assert.equal(approval.request.toolName, shell)
   assert.equal(typeof approval.request.callId, 'string')
   const waitingApproval = await runtime.rpc('session/state', { request: { sessionId } })
   assert.ok(waitingApproval.value.pendingInput.includes('approval'))
@@ -214,7 +216,7 @@ test('冷启动先从原生入口继续同一 Session，llm-wiki 读取原 Wiki 
     { name: 'grep', arguments: { pattern: 'durable', path: 'index.md' } },
     { name: 'read', arguments: { file_path: 'concepts/sessions.md' } },
     { name: 'read', arguments: { file_path: 'raw/session-evidence.md' } },
-    { name: 'bash', arguments: { description: 'Search the bound Wiki source', command: 'WIKI_PATH="$DSH_MEDIA_DESK_WIKI_PATH" sh -c \'rg -n "17 durable" "$WIKI_PATH/raw/session-evidence.md"\'', timeoutMs: 10000, run_in_background: false } },
+    { name: shell, arguments: { description: 'Search the bound Wiki source', command: process.platform === 'win32' ? 'Select-String -Pattern "17 durable" -LiteralPath (Join-Path $env:DSH_MEDIA_DESK_WIKI_PATH "raw/session-evidence.md")' : 'WIKI_PATH="$DSH_MEDIA_DESK_WIKI_PATH" sh -c \'rg -n "17 durable" "$WIKI_PATH/raw/session-evidence.md"\'', timeoutMs: 10000, run_in_background: false } },
   ], reply: 'The dated source records 17 durable tool events; this fixture observation does not guarantee current production behavior.' }
   await runtime.start()
   const opened = await runtime.host('sessions/open', { workId: 'seed_2' })

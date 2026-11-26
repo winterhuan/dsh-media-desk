@@ -7,11 +7,12 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
+import { fileURLToPath } from 'node:url'
 import { nativeRuntime } from './fixtures/native-runtime.js'
 import { SkillDesk } from '../src/skill-desk.js'
 
 const execute = promisify(execFile)
-const cli = new URL('../scripts/media-desk.mjs', import.meta.url).pathname
+const cli = fileURLToPath(new URL('../scripts/media-desk.mjs', import.meta.url))
 const plan = { title: '共用技能作品', coverText: '控制边界', cover: 'Plain paper and a ledger', facts: [], outline: [], characters: '', images: [], shots: [], sources: [] }
 
 function caller(runtime, mode = 'standalone') {

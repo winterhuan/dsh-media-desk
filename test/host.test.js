@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { assertPublicUrl, harvest, harvestText } from '../src/harvest.js'
@@ -174,12 +174,13 @@ test('generateImage 遇到 5xx 重试一次', async () => {
   assert.equal(n, 2)
 })
 
-test('Settings 权限 600，密钥不外泄，空密钥不覆盖', async () => {
+test('Settings 在 POSIX 下权限 600，所有平台密钥不外泄，空密钥不覆盖', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'media-desk-set-'))
   try {
     const settings = new Settings(dir)
     await settings.update({ image: { baseUrl: 'https://x.example/v1/images/generations/', model: 'm', apiKey: 'sk-abcdefgh1234' }, imageCount: 99 })
-    assert.equal((await stat(join(dir, 'settings.json'))).mode & 0o777, 0o600)
+    // Windows protects files through inherited ACLs; POSIX mode bits do not describe those ACLs.
+    if (process.platform !== 'win32') assert.equal((await stat(join(dir, 'settings.json'))).mode & 0o777, 0o600)
     const open = publicSettings(await settings.read())
     assert.equal(open.image.baseUrl, 'https://x.example/v1')
     assert.equal(open.image.keyHint, '1234')
@@ -270,7 +271,7 @@ test('saveProduction 写出文章、脚本和素材，标题里的路径字符�
 })
 
 test('resolveExportDir 展开 ~，空值用默认位置', () => {
-  assert.match(resolveExportDir(''), /Documents\/自媒体工作台$/)
+  assert.equal(resolveExportDir(''), join(homedir(), 'Documents', '自媒体工作台'))
   assert.ok(!resolveExportDir('~/x').startsWith('~'))
   assert.equal(resolveExportDir('/tmp/x'), '/tmp/x')
 })

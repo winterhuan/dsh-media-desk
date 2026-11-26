@@ -1,7 +1,7 @@
 // 数据复盘。
 import React from 'react'
 import { RuleEvidence } from './rules.jsx'
-import { dispatchOps, fetchInsights, learnSkills, openItem, setDesk, toast, useDesk } from './desk.js'
+import { dispatchOps, learnSkills, openItem, setDesk, toast, useDesk } from './desk.js'
 import { EN } from './en/index.js'
 import { lang, plural, t, useLang } from './i18n.js'
 import { Icon, Segmented } from './ui.jsx'
@@ -150,14 +150,9 @@ export function InsightsView() {
   const items = useDesk(s => s.state.items)
   const metrics = useDesk(s => s.state.metrics)
   const skills = useDesk(s => s.state.skills)
-  const [data, setData] = React.useState(null)
+  const data = useDesk(s => s.state.insights)
   const [show, setShow] = React.useState('chart')
   const accounts = useDesk(s => s.state.accounts)
-  React.useEffect(() => {
-    let alive = true
-    fetchInsights().then((next) => { if (alive) setData(next) }).catch(err => toast(err.message, { error: true }))
-    return () => { alive = false }
-  }, [metrics, items])
   if (!data) return <div className="md-board-page"><div className="md-tile md-i-hero" /></div>
   // 有真实数据后，不再把示例规则当建议
   const proposed = skills.filter(s => s.status === 'proposed' && (data.hasSample || !s.sample))
@@ -166,7 +161,6 @@ export function InsightsView() {
   const barKey = data.platforms.every(p => p.views > 0) ? 'views' : 'engaged'
   const maxBar = Math.max(1, ...data.platforms.map(p => p[barKey]))
   const realAccounts = accounts.some(row => row.externalId)
-  const dialog = null
   const best = data.top[0]
   const bestItem = best && items.find(i => i.id === best.id)
   const heroPic = bestItem && posterOf(displayItem(bestItem))
@@ -185,7 +179,6 @@ export function InsightsView() {
             {actions}
           </div>
         </section>
-        {dialog}
       </div>
     )
   }
@@ -275,7 +268,6 @@ export function InsightsView() {
           </div>
         </section>
       </div>
-      {dialog}
     </div>
   )
 }

@@ -6,17 +6,18 @@ import { promisify } from 'node:util'
 import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, symlink, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import { Notes } from '../src/notes.js'
 import { DeskReader } from '../src/desk-reader.js'
 
 const execute = promisify(execFile)
-const cli = new URL('../scripts/media-desk-read.mjs', import.meta.url).pathname
+const cli = fileURLToPath(new URL('../scripts/media-desk-read.mjs', import.meta.url))
 
 test('npm 符号链接入口和 skill 包装器均执行一次只读命令', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'media-read-bin-')))
   t.after(() => rm(root, { recursive: true, force: true }))
   const packageLink = join(root, 'package')
-  await symlink(new URL('../', import.meta.url).pathname, packageLink, 'dir')
+  await symlink(fileURLToPath(new URL('../', import.meta.url)), packageLink, process.platform === 'win32' ? 'junction' : 'dir')
   const bin = join(root, 'media-desk')
   await symlink(join(packageLink, 'scripts/media-desk-read.mjs'), bin)
   const env = { ...process.env, DSH_HOME: join(root, 'home'), WIKI_PATH: join(root, 'wiki') }

@@ -12,7 +12,7 @@ const read = { name: 'media_desk_read', arguments: { kind: 'work' } }
 const plan = { title: 'Native wait evidence', coverText: 'Evidence', facts: [], outline: [], cover: 'Paper', images: [], shots: [], sources: [] }
 const submit = { name: 'media_desk_submit_result', arguments: { stageId: '$stageId', result: JSON.stringify(plan) } }
 const question = { name: 'ask_user_question', arguments: { questions: [{ id: 'direction', question: 'Which evidence should the script use?', options: [{ label: 'Dated', description: 'Use the dated source.' }, { label: 'Brief', description: 'Use the brief source.' }] }] } }
-const approval = { name: 'bash', arguments: { description: 'Write an approved fixture observation', command: "printf 'approved\n' > wait-approved.txt", timeoutMs: 10000, run_in_background: false, sandbox_permissions: 'danger-full-access', justification: 'Save this fixture observation after native approval.' } }
+const approval = { name: process.platform === 'win32' ? 'pwsh' : 'bash', arguments: { description: 'Write an approved fixture observation', command: process.platform === 'win32' ? '[IO.File]::WriteAllText((Join-Path (Get-Location) "wait-approved.txt"), "approved`n")' : "printf 'approved\n' > wait-approved.txt", timeoutMs: 10000, run_in_background: false, sandbox_permissions: 'danger-full-access', justification: 'Save this fixture observation after native approval.' } }
 const waitState = async (runtime, predicate) => {
   const deadline = Date.now() + 60000
   for (;;) {
