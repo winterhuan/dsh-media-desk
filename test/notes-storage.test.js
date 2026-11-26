@@ -626,7 +626,7 @@ test('公开停用 Host 取消模型调用，等待外部结算和所属写入�
   contender = await nativeRuntime(t)
   const barrier = Object.fromEntries(['enteredPath', 'releasePath', 'abortedPath', 'cleanupReleasePath', 'settledPath'].map(name => [name, join(holder.root, name)]))
   recipes.MD_STAGE_plan = { calls: [], reply: 'A delayed model result.', barrier }
-  await holder.start()
+  await holder.start([{ id: 'hmr', disabled: false, config: { root: [] } }])
   const added = await holder.host('ops', { ops: [{ op: 'add_item', title: 'A work with a held model', body: 'MD_FIXTURE_PRODUCER_BARRIER accepted source text.\n', language: 'en' }] })
   const id = added.value.receipts[0].target
   const reference = added.value.state.items.find(row => row.id === id).content
