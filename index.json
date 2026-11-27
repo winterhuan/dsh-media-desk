@@ -1,0 +1,72 @@
+{
+  "format": 1,
+  "title": {
+    "en": "Media Desk (winter fork)",
+    "zh": "自媒体工作台（winter fork）"
+  },
+  "description": {
+    "en": "The plugin index for Media Desk: one URL, one-click install.",
+    "zh": "自媒体工作台的插件索引：一条地址，一键安装。"
+  },
+  "metadata": {
+    "categories": {
+      "content-creation": {
+        "title": {
+          "en": "Content creation",
+          "zh": "内容创作"
+        }
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "@winterhuan/dsh-media-desk",
+      "title": {
+        "en": "Media Desk",
+        "zh": "自媒体工作台"
+      },
+      "description": {
+        "en": "Capture an idea in one sentence, then generate the spoken script, title, cover, illustrations, and line-art storyboards. A content workbench for DeepSeek Harness: idea wall, drafts, schedule, insights, and reusable style cards.",
+        "zh": "一句话记灵感，一键做出脚本、封面、配图和黑白线稿分镜。DeepSeek Harness 上的自媒体创作工作台：灵感墙、成稿、排期、复盘和专属风格卡。"
+      },
+      "author": "winterhuan",
+      "homepage": "https://github.com/winterhuan/dsh-media-desk#readme",
+      "repository": {
+        "url": "https://github.com/winterhuan/dsh-media-desk"
+      },
+      "metadata": {
+        "category": "content-creation",
+        "keywords": [
+          "dsh",
+          "deepseek-harness",
+          "dsh-plugin",
+          "content-creation",
+          "script",
+          "cover",
+          "storyboard",
+          "xiaohongshu",
+          "自媒体",
+          "小红书",
+          "脚本",
+          "封面",
+          "分镜"
+        ]
+      },
+      "versions": [
+        {
+          "version": "2.7.0-winter.15",
+          "publishTimestamp": 1795589426,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/winterhuan/dsh-media-desk",
+            "commit": "7bbda83f57f481acee0357f0513d982068c86b73"
+          },
+          "engines": {
+            "node": ">=20",
+            "dsh": "0.2.2-rc.5"
+          }
+        }
+      ]
+    }
+  ]
+}

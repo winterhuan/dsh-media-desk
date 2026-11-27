@@ -100,3 +100,19 @@ test('单篇进度只读取目标正文，外部编辑的版本与全局读取�
   assert.equal(changed.content.revision, item.content.revision + 1)
   assert.deepEqual((await store.read()).items.find(row => row.id === id).content, changed.content)
 })
+
+test('版本接口不读取作品，新增文风字段经 Notes 保存和重新读取保留', async t => {
+  const { desk, get } = await openDesk(t)
+  const info = { current: '2.7.0-winter.15', latest: '2.7.2-winter.1', updateAvailable: true }
+  t.mock.method(desk.version, 'read', async () => info)
+  const reader = t.mock.method(desk.store, 'read')
+  assert.deepEqual(await get('version'), info)
+  assert.equal(reader.mock.callCount(), 0)
+  reader.mock.restore()
+  const fields = { logic: 'Start from evidence', story: 'Lead with one scene', flow: 'Connect cause and effect' }
+  await desk.store.mutate('Save upstream style fields', draft => applyOps(draft, [{ op: 'add_style', name: 'Expanded style', ...fields }]))
+  const style = (await desk.store.read()).styles.find(row => row.name === 'Expanded style')
+  for (const [key, value] of Object.entries(fields)) assert.equal(style[key], value)
+  const saved = await readFile(join(style.content.notesRoot, style.content.relativePath), 'utf8')
+  for (const value of Object.values(fields)) assert.ok(saved.includes(value))
+})

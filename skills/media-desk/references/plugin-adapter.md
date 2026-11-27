@@ -18,7 +18,7 @@ node /absolute/media-desk-package/scripts/media-desk.mjs commit --mode plugin --
 | begin | {id,requestId,format:"article"或"script",withImages?}，返回 request 与冻结 preferences |
 | commit | {requestId,plan:{...},result:{article,sources,ruleChecks},engine?} |
 | rules | {result:{rules:[{name,rule,evidence,scope,before?,after?,relatedRuleId?}]},learningSource?,resultId?} |
-| style | {result:{name,summary,tone,sentences,opening,structure,words,avoid,samples},sourceUrls?,sampleMaterial?,resultId?} |
+| style | {result:{name,summary,tone,sentences,opening,structure,logic,story,flow,words,avoid,samples},sourceUrls?,sampleMaterial?,resultId?} |
 | cancel | {requestId}，取消尚未接受的独立制作请求 |
 | capture | {url,title?,note?,tags?,language?,textOnly?}，textOnly 只读网页全文 |
 | upload | {file:"绝对路径"}，返回 media.src 与 kind |

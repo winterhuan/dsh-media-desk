@@ -1,4 +1,4 @@
-/** Shared OpenAI-compatible image transport; it returns bytes without storing caller business state. */
+/** Shared OpenAI, Bailian and Wan image transport; it returns bytes without storing caller business state. */
 import { assertPublicUrl } from './public-url.mjs'
 const text = (value, vars) => vars ? value.replace(/\{(\w+)\}/g, (match, key) => String(vars[key] ?? match)) : value
 
@@ -122,7 +122,7 @@ async function downloadImage(entry, image, fetchImpl, signal, tr) {
   throw last
 }
 
-async function requestOnce(image, prompt, fetchImpl, signal, tr) {
+async function requestOpenAI(image, prompt, fetchImpl, signal, tr) {
   const extra = image.extra ? JSON.parse(image.extra) : {}
   const body = { model: image.model, prompt, n: 1, ...(image.size ? { size: image.size } : {}), ...(image.quality ? { quality: image.quality } : {}), ...extra }
   const res = await fetchImpl(`${image.baseUrl}/images/generations`, {
@@ -152,6 +152,200 @@ async function requestOnce(image, prompt, fetchImpl, signal, tr) {
   throw error
 }
 
+/** 用户可能贴完整端点、带 /api/v1 或只贴域名，统一归一成域名根。 */
+function dashscopeRoot(baseUrl, patterns) {
+  let root = String(baseUrl ?? '').trim().replace(/\/+$/, '')
+  for (const pattern of patterns) root = root.replace(pattern, '')
+  return root.replace(/\/api\/v1$/i, '')
+}
+
+/** 百炼同步生图端点（千问图像、万相 2.6/2.7 同步）。 */
+export function bailianEndpoint(baseUrl) {
+  const root = dashscopeRoot(baseUrl, [/\/api\/v1\/services\/aigc\/multimodal-generation\/generation$/i])
+  return `${root}/api/v1/services/aigc/multimodal-generation/generation`
+}
+
+/** 万相异步任务提交端点（万相 2.5 及以下）。 */
+export function wanSubmitEndpoint(baseUrl) {
+  const root = dashscopeRoot(baseUrl, [/\/api\/v1\/services\/aigc\/text2image\/image-synthesis$/i, /\/api\/v1\/tasks\/[^/]+$/i])
+  return `${root}/api/v1/services/aigc/text2image/image-synthesis`
+}
+
+/** 万相异步任务查询端点。 */
+export function wanTaskEndpoint(baseUrl, taskId) {
+  const root = dashscopeRoot(baseUrl, [/\/api\/v1\/services\/aigc\/text2image\/image-synthesis$/i, /\/api\/v1\/tasks\/[^/]+$/i])
+  return `${root}/api/v1/tasks/${encodeURIComponent(taskId)}`
+}
+
+/** 百炼的尺寸格式是 宽*高；界面沿用 OpenAI 的 宽x高，发请求前转换。 */
+function bailianSize(size) {
+  const value = String(size ?? '').trim().replace(/[xX×]/g, '*').replace(/\s+/g, '')
+  return /^\d+\*\d+$/.test(value) ? value : ''
+}
+
+async function requestBailian(image, prompt, fetchImpl, signal, tr) {
+  const parameters = {}
+  const size = bailianSize(image.size)
+  if (size) parameters.size = size
+  if (image.extra) Object.assign(parameters, JSON.parse(image.extra))
+  const body = {
+    model: image.model,
+    input: { messages: [{ role: 'user', content: [{ text: prompt }] }] },
+    ...(Object.keys(parameters).length ? { parameters } : {}),
+  }
+  const res = await fetchImpl(bailianEndpoint(image.baseUrl), {
+    method: 'POST',
+    headers: { authorization: `Bearer ${image.apiKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  })
+  const raw = await res.text()
+  let data = null
+  try {
+    data = JSON.parse(raw)
+  } catch {
+    // 网关偶尔返回 HTML 错误页
+  }
+  if (!res.ok) {
+    const error = new Error(explain(res.status, redact(data?.message ?? data?.error?.message ?? '', image.apiKey), tr))
+    error.retryable = res.status >= 500
+    throw error
+  }
+  // 百炼可能在 200 里返回业务错误码
+  if (data?.code) {
+    const error = new Error(tr('百炼返回错误：{message}', { message: redact(data.message ?? data.code, image.apiKey) }))
+    error.retryable = /Throttling|InternalError|ServiceUnavailable|RequestTimeOut/i.test(String(data.code))
+    throw error
+  }
+  const content = data?.output?.choices?.[0]?.message?.content
+  const url = Array.isArray(content) ? content.find(row => typeof row?.image === 'string' && row.image)?.image : null
+  if (!url) throw new Error(tr('生图服务没有返回图片'))
+  return downloadImage({ url }, image, fetchImpl, signal, tr)
+}
+
+/** 等一会儿，期间可以被取消信号打断。 */
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error('cancelled'))
+      return
+    }
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(signal.reason ?? new Error('cancelled'))
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+function wanError(data, image) {
+  return redact(data?.message ?? data?.error?.message ?? data?.code ?? '', image.apiKey)
+}
+
+/** 万相异步：提交任务，轮询 task_id，成功后下载 results[].url。 */
+async function requestWan(image, prompt, fetchImpl, signal, tr, pollIntervalMs = 3000) {
+  const extra = image.extra ? JSON.parse(image.extra) : {}
+  const { negative_prompt: negativePrompt, ...parameterExtra } = extra
+  const parameters = { n: 1 }
+  const size = bailianSize(image.size)
+  if (size) parameters.size = size
+  Object.assign(parameters, parameterExtra)
+  const input = { prompt, ...(typeof negativePrompt === 'string' && negativePrompt.trim() ? { negative_prompt: negativePrompt.trim() } : {}) }
+  const submit = await fetchImpl(wanSubmitEndpoint(image.baseUrl), {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${image.apiKey}`,
+      'content-type': 'application/json',
+      'x-dashscope-async': 'enable',
+    },
+    body: JSON.stringify({ model: image.model, input, parameters }),
+    signal,
+  })
+  const submitRaw = await submit.text()
+  let submitted = null
+  try {
+    submitted = JSON.parse(submitRaw)
+  } catch {
+    // 网关偶尔返回 HTML 错误页
+  }
+  if (!submit.ok) {
+    const error = new Error(explain(submit.status, wanError(submitted, image), tr))
+    error.retryable = submit.status >= 500
+    throw error
+  }
+  if (submitted?.code) throw new Error(tr('万相返回错误：{message}', { message: wanError(submitted, image) || submitted.code }))
+  const taskId = submitted?.output?.task_id
+  if (!taskId) throw new Error(tr('万相没有返回任务 ID'))
+
+  const startedAt = Date.now()
+  let interval = Math.max(1, pollIntervalMs)
+  let failures = 0
+  for (;;) {
+    await sleep(interval, signal)
+    let res
+    try {
+      res = await fetchImpl(wanTaskEndpoint(image.baseUrl, taskId), {
+        headers: { authorization: `Bearer ${image.apiKey}` },
+        signal,
+      })
+    } catch (err) {
+      if (signal?.aborted) throw err
+      failures += 1
+      if (failures >= 5) {
+        const error = new Error(tr('查询万相任务失败：{message}', { message: err.message }))
+        error.permanent = true
+        throw error
+      }
+      continue
+    }
+    const raw = await res.text()
+    let data = null
+    try {
+      data = JSON.parse(raw)
+    } catch {
+      // 轮询偶尔会拿到非 JSON 的错误页
+    }
+    if (!res.ok) {
+      if (res.status >= 500) {
+        failures += 1
+        if (failures >= 5) {
+          const error = new Error(explain(res.status, wanError(data, image), tr))
+          error.permanent = true
+          throw error
+        }
+        continue
+      }
+      throw new Error(explain(res.status, wanError(data, image), tr))
+    }
+    failures = 0
+    if (data?.code) throw new Error(tr('万相返回错误：{message}', { message: wanError(data, image) || data.code }))
+    const output = data?.output
+    const status = output?.task_status
+    if (status === 'SUCCEEDED') {
+      const results = Array.isArray(output.results) ? output.results : []
+      const url = results.find(row => typeof row?.url === 'string' && row.url)?.url
+      if (url) return downloadImage({ url }, image, fetchImpl, signal, tr)
+      const failed = results.find(row => row?.code || row?.message)
+      throw new Error(tr('万相任务没有返回图片：{message}', { message: redact(failed?.message ?? failed?.code ?? '', image.apiKey) }))
+    }
+    if (status === 'FAILED') throw new Error(tr('万相任务失败：{message}', { message: wanError(output, image) || tr('未知原因') }))
+    if (status === 'CANCELED') throw new Error(tr('万相任务已取消'))
+    if (status === 'UNKNOWN') throw new Error(tr('万相任务不存在或已过期'))
+    if (status !== 'PENDING' && status !== 'RUNNING') throw new Error(tr('万相任务状态异常：{status}', { status: String(status ?? '') }))
+    if (Date.now() - startedAt > 30_000) interval = Math.max(interval, 10_000)
+  }
+}
+
+async function requestOnce(image, prompt, fetchImpl, signal, tr, options) {
+  if (image.protocol === 'bailian') return requestBailian(image, prompt, fetchImpl, signal, tr)
+  if (image.protocol === 'wan') return requestWan(image, prompt, fetchImpl, signal, tr, options.pollIntervalMs)
+  return requestOpenAI(image, prompt, fetchImpl, signal, tr)
+}
+
 /** new URL 解析失败也是 TypeError，但它不是网络问题。 */
 function isUrlError(err) {
   return err?.code === 'ERR_INVALID_URL' || /Invalid URL/i.test(err?.message ?? '')
@@ -164,13 +358,13 @@ function isUrlError(err) {
  * @param {{fetchImpl?: typeof fetch, signal?: AbortSignal}} [options]
  * @returns {Promise<{buffer: Buffer, ext: string}>} 图片内容和扩展名。
  */
-export async function generateImage(image, prompt, { fetchImpl = fetch, signal, translate: tr = text } = {}) {
+export async function generateImage(image, prompt, { fetchImpl = fetch, signal, pollIntervalMs, translate: tr = text } = {}) {
   let lastError = null
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const timeout = AbortSignal.timeout(TIMEOUT_MS)
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout
     try {
-      const { buffer } = await requestOnce(image, prompt, fetchImpl, combined, tr)
+      const { buffer } = await requestOnce(image, prompt, fetchImpl, combined, tr, { pollIntervalMs })
       return imageBuffer(buffer, tr)
     } catch (err) {
       if (signal?.aborted) throw err

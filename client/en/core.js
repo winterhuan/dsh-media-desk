@@ -2,6 +2,7 @@
 export const CORE = {
   // 侧栏和顶栏
   '自媒体工作台': 'Media Desk',
+  '灵感、内容、排期、复盘、风格': 'Ideas, content, schedule, insights, styles',
   '工作台导航': 'Desk navigation',
   '灵感（导航）': 'Ideas',
   '灵感': 'Idea',
@@ -16,6 +17,9 @@ export const CORE = {
   '原生会话': 'Native session',
   '重试建立关联': 'Retry session binding',
   '全局原生会话': 'Global native session',
+  '版本': 'Version',
+  '新版本 {version} 已发布，点击查看更新说明': 'Update {version} is available — click for release notes',
+  '有新版本 ↑ v{version}': 'v{version} is available',
   '工作台加载失败：{error}': 'Couldn’t load Media Desk: {error}',
   '重试': 'Retry',
   '正在铺开灵感…': 'Loading your ideas…',

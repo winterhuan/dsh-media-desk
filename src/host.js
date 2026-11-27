@@ -28,6 +28,7 @@ import { Notes, notesSaveMessage } from './notes.js'
 import { WriteOwner } from './write-owner.js'
 import { pruneNotesHistory } from './notes-history.js'
 import { SkillDesk } from './skill-desk.js'
+import { createVersionCheck } from './version.js'
 
 const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets')
 const MAX_JSON = 4_000_000
@@ -205,6 +206,7 @@ async function route(ctx, store, desk, req, res) {
     return sendFile(req, res, await desk.mediaFiles.resolve(id), desk.ownership.signal)
   }
   if (method === 'GET') {
+    if (path === 'version') return json(res, 200, await desk.version.read())
     if (path === 'notes/migrations') return json(res, 200, { migrations: await store.migration.list() })
     if (path === 'notes/saves') return json(res, 200, { writes: await store.saves() })
     if (path === 'sessions') return json(res, 200, { associations: await desk.nativeSessions.list() })
@@ -414,6 +416,7 @@ export default class MediaDeskHost extends Service {
     await ownership.acquire()
     const store = new Store(ownership.dataRoot, ownership)
     store.onCleanupError = error => ctx.logger.error(error)
+    this.version = createVersionCheck()
     const settings = new Settings(store.root, ownership, store)
     const producer = new Producer({
       store, settings,

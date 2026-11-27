@@ -33,6 +33,8 @@ dsh --profile media-desk-dev --port 0 --no-open
 
 Open Media Desk in the sidebar. The package includes its Host entry and browser bundle. The upstream npm package and this fork share panel IDs, routes and data; enable only one in a profile. Workbench state and settings stay under `<DSH_HOME>/media-desk/`, with `~/.dsh` as the default home; registered work text lives in Wiki Notes. The [user guide](GUIDE.md) explains the five views, native input, images, recovery and file export.
 
+The workbench also registers an optional better-sidebar tab. The header and settings show this fork’s published Git version: successful checks are cached for one hour, failed checks can retry after 30 seconds, and updates are never installed automatically. The local [market index](index.json) contains fixed Git releases; `pnpm run index` regenerates it from the matching existing release tag. The [upstream introduction](site/index.html) documents the original project and links back to this fork.
+
 <a id="shared-skill"></a>
 ### Shared Media Desk skill
 

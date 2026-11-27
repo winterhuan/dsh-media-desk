@@ -1,5 +1,6 @@
 // dsh-media-desk 浏览器半片：侧栏入口 + main 全局面板。
 import React from 'react'
+import { createPortal } from 'react-dom'
 import { HomeView } from './canvas.jsx'
 import { ChatDock, NativeConversation } from './chat.jsx'
 import { ContentView } from './content.jsx'
@@ -13,6 +14,7 @@ import { SettingsDialog } from './settings.jsx'
 import { Studio } from './studio.jsx'
 import css from './styles.css'
 import { lang, subscribeLang, t, useLang } from './i18n.js'
+import { updateUrl, useVersionInfo } from './version.js'
 import { Dialog, FormDialog, Icon, IconButton, Toast } from './ui.jsx'
 
 const PANEL_ID = 'media-desk'
@@ -96,6 +98,17 @@ function CaptureDialog() {
   )
 }
 
+function UpdateBadge() {
+  const info = useVersionInfo()
+  const href = updateUrl(info)
+  if (!href) return null
+  return (
+    <a className="md-update" href={href} target="_blank" rel="noreferrer" title={t('新版本 {version} 已发布，点击查看更新说明', { version: info.latest })}>
+      ↑ v{info.latest}
+    </a>
+  )
+}
+
 function SampleBadge() {
   const hasSample = useDesk(s => s.state.items.some(i => i.sample))
   if (!hasSample) return null
@@ -167,6 +180,7 @@ function Desk({ openSession, retainSession, SessionProvider, renderSlot, initial
           {canUndo ? <IconButton icon="undo" label={t('撤销上一步')} onClick={() => undo()} /> : null}
           {ready ? <IconButton icon="save" label={t('恢复保存与迁移')} onClick={() => setDesk({ notesRecovery: true })} /> : null}
           {ready ? <NativeSessionButton openSession={openSession} /> : null}
+          {ready ? <UpdateBadge /> : null}
           <IconButton icon="gear" label={t('设置')} onClick={() => setDesk({ settingsOpen: true })} />
           {showDock ? null : <button type="button" className="md-open-dock" onClick={() => setDesk({ dockOpen: true })}><Icon name="chat" size={15} />{t('助手')}</button>}
         </header>
@@ -222,4 +236,35 @@ export function apply(ctx) {
     const off = subscribeLang(mount)
     return () => { off(); release?.() }
   }, 'dsh-media-desk: sidebar entry')
+  mountBetterSidebar(ctx)
+}
+
+/** Mount the optional sidebar through a slot-owned portal so native Session props remain available. */
+function mountBetterSidebar(ctx) {
+  ctx.inject(['betterSidebar'], inner => {
+    const sidebar = inner.betterSidebar
+    if (typeof sidebar?.registerTab !== 'function') return
+    const targetRef = element => setDesk({ sidebarTarget: element })
+    function SidebarTarget() { return <div className="md-sidebar-target" ref={targetRef} /> }
+    function SidebarDesk(props) {
+      const target = useDesk(state => state.sidebarTarget)
+      const renderSlot = React.useCallback((key, owner) => props.renderSlot(
+        key === 'media-desk.conversation' ? 'media-desk.sidebar.conversation' : key, owner), [props.renderSlot])
+      return target ? createPortal(<Desk {...props} renderSlot={renderSlot} />, target) : null
+    }
+    inner.slots.inject('shell.overlay', () => inner.slots.register({
+      name: 'shell.overlay', id: 'media-desk:sidebar',
+      children: { 'media-desk.sidebar.conversation': { kind: 'single', scope: 'session' } },
+      inject: () => ({ openSession: sessionId => inner.uiWorkspace.openSession(sessionId),
+        retainSession: sessionId => inner.sessions.retain(sessionId, { source: 'sidebarView' }),
+        initializeDraft: (reference, prompt) => inner.conversation.input.requestDraftInitialization(reference.binding, { prompt, whenDraftExists: 'append' }) }),
+    }, SidebarDesk))
+    inner.slots.inject('media-desk.sidebar.conversation', () => inner.slots.register({ name: 'media-desk.sidebar.conversation' }, NativeConversation))
+    inner.effect(() => sidebar.registerTab({
+      id: `${PANEL_ID}:workbench`, title: () => t('自媒体工作台'),
+      description: () => t('灵感、内容、排期、复盘、风格'),
+      icon: size => <PanelIcon size={size} />, order: 60, single: true, component: SidebarTarget,
+    }), 'media-desk: better-sidebar tab')
+    inner.effect(() => () => setDesk({ sidebarTarget: null }), 'media-desk: sidebar target')
+  })
 }

@@ -8,7 +8,7 @@ import { tr } from './i18n.js'
 import { HISTORY_LIMIT, historyDirectory, unusedPath } from './notes-paths.js'
 
 const METADATA = ['title', 'tags', 'source', 'url', 'language', 'noteMetadata']
-const STYLE_TEXT = ['name', 'icon', 'summary', 'tone', 'sentences', 'opening', 'structure', 'words', 'avoid', 'samples', 'source', 'sourceUrls']
+const STYLE_TEXT = ['name', 'icon', 'summary', 'tone', 'sentences', 'opening', 'structure', 'logic', 'story', 'flow', 'words', 'avoid', 'samples', 'source', 'sourceUrls']
 const RULE_TEXT = ['name', 'rule', 'source', 'evidence', 'scope', 'before', 'after', 'relatedRuleId']
 const MATERIAL_TEXT = ['title', 'body', 'source', 'url', 'createdAt', 'publishedAt', 'collectedAt', 'materialType', 'completeness', 'externalId', 'styleId', 'selectedAuthorSample']
 /** Fields retained with a work's language when selection or undo targets another language. */

@@ -1,6 +1,9 @@
 // GitHub issue 回归：#3 生图网关返回相对路径，#4 会话外调用缺少会话标识。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { generateImage, imageUrlCandidates } from '../src/images.js'
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex')
@@ -89,4 +92,54 @@ test('移除旧助手模型覆盖时保留设置，显示模型跟随原生默�
   await settings.update({ voice: 'x', assistant: { provider: 'removed', model: 'missing' } })
   assert.equal(Object.hasOwn(await settings.read(), 'assistant'), false)
   assert.equal((await settings.read()).image.apiKey, 'private-fixture')
+})
+
+test('#16 Notes exports retain external edits and isolate same-title snapshots', async t => {
+  const { saveProduction } = await import('../src/export.js')
+  const dir = await mkdtemp(join(tmpdir(), 'media-export-upstream-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const options = { filesDir: dir, exportDir: join(dir, 'out') }
+  const work = { title: 'Same title', article: 'First draft' }
+  const first = await saveProduction(work, options)
+  await writeFile(join(first.path, '脚本.md'), 'Externally edited draft')
+  const second = await saveProduction({ ...work, article: 'Second draft', savedPath: first.path }, options)
+  assert.notEqual(second.path, first.path)
+  assert.equal(await readFile(join(first.path, '脚本.md'), 'utf8'), 'Externally edited draft')
+  assert.match(await readFile(join(second.path, '脚本.md'), 'utf8'), /Second draft/)
+  const third = await saveProduction(work, options)
+  assert.notEqual(third.path, first.path)
+  assert.notEqual(third.path, second.path)
+})
+
+test('#15 一篇内容有导入的累计数据时，手动再录的不重复计算', async () => {
+  const { computeInsights } = await import('../src/learn.js')
+  const state = {
+    items: [
+      { id: 'a', title: '导入的', platform: '抖音', status: 'published' },
+      { id: 'b', title: '手动的', platform: '公众号', status: 'published' },
+    ],
+    accounts: [], skills: [],
+    metrics: [
+      { id: 'm1', itemId: 'a', platform: '抖音', date: '2026-11-01T04:00:00Z', views: 120, likes: 12, externalId: '抖音:1', fetchedAt: '2026-11-10T00:00:00Z' },
+      { id: 'm2', itemId: 'a', platform: '抖音', date: '2026-11-05T04:00:00Z', views: 100, likes: 10 },
+      // 手动数据按天录，同一篇的几条相加
+      { id: 'm3', itemId: 'b', platform: '公众号', date: '2026-11-02T04:00:00Z', views: 30, likes: 1 },
+      { id: 'm4', itemId: 'b', platform: '公众号', date: '2026-11-03T04:00:00Z', views: 20, likes: 2 },
+      // 不关联内容的平台数据照常计入
+      { id: 'm5', itemId: null, platform: '公众号', date: '2026-11-04T04:00:00Z', views: 5 },
+    ],
+  }
+  const data = computeInsights(state)
+  assert.equal(data.views, 175)
+  assert.deepEqual(data.top.map(row => [row.id, row.views]), [['a', 120], ['b', 50]])
+  assert.deepEqual(data.platforms.map(row => [row.platform, row.views]), [['抖音', 120], ['公众号', 55]])
+  assert.equal(data.daily.reduce((total, day) => total + day.views, 0), 175)
+  assert.equal(data.imported, true)
+  assert.equal(data.skipped, 1)
+
+  // 没有导入数据时和原来一样全部相加
+  const manual = computeInsights({ ...state, metrics: state.metrics.filter(row => !row.externalId) })
+  assert.equal(manual.views, 155)
+  assert.equal(manual.imported, false)
+  assert.equal(manual.skipped, 0)
 })

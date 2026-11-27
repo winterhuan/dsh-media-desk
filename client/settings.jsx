@@ -2,15 +2,19 @@
 import React from 'react'
 import { saveSettings, setDesk, testImage, useDesk } from './desk.js'
 import { t, useLang } from './i18n.js'
+import { updateUrl, useVersionInfo } from './version.js'
 import { Dialog, Icon } from './ui.jsx'
 
 // 常见服务的 OpenAI 兼容地址，模型名以各家文档为准。label 是中文原文，显示时再翻译
 const PRESETS = [
-  { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-image-1', size: '1536x1024', quality: 'medium', extra: '' },
-  { id: 'xai', label: 'xAI', baseUrl: 'https://api.x.ai/v1', model: 'grok-2-image', size: '', quality: '', extra: '' },
-  { id: 'ark', label: '火山方舟', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: '', size: '1024x1024', quality: '', extra: '' },
-  { id: 'zhipu', label: '智谱', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'cogview-4', size: '1024x1024', quality: '', extra: '' },
-  { id: 'silicon', label: '硅基流动', baseUrl: 'https://api.siliconflow.cn/v1', model: '', size: '', quality: '', extra: '{"image_size":"1024x1024"}' },
+  { id: 'openai', label: 'OpenAI', protocol: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-image-1', size: '1536x1024', quality: 'medium', extra: '' },
+  { id: 'xai', label: 'xAI', protocol: 'openai', baseUrl: 'https://api.x.ai/v1', model: 'grok-2-image', size: '', quality: '', extra: '' },
+  { id: 'ark', label: '火山方舟', protocol: 'openai', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: '', size: '1024x1024', quality: '', extra: '' },
+  { id: 'zhipu', label: '智谱', protocol: 'openai', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'cogview-4', size: '1024x1024', quality: '', extra: '' },
+  { id: 'silicon', label: '硅基流动', protocol: 'openai', baseUrl: 'https://api.siliconflow.cn/v1', model: '', size: '', quality: '', extra: '{"image_size":"1024x1024"}' },
+  { id: 'bailian', label: '阿里云百炼', protocol: 'bailian', baseUrl: 'https://dashscope.aliyuncs.com', model: 'qwen-image-2.0-pro', size: '2688x1536', quality: '', extra: '' },
+  { id: 'bailian-token', label: '百炼 Token Plan', protocol: 'bailian', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com', model: 'qwen-image-3.0-pro', size: '1024x1024', quality: '', extra: '' },
+  { id: 'wan', label: '百炼万相（异步）', protocol: 'wan', baseUrl: 'https://dashscope.aliyuncs.com', model: 'wan2.5-t2i-preview', size: '1280x1280', quality: '', extra: '' },
   { id: 'custom', label: '其他自定义', baseUrl: '', model: '', size: '1024x1024', quality: '', extra: '' },
 ]
 
@@ -29,10 +33,11 @@ export function SettingsDialog() {
   const [testing, setTesting] = React.useState(false)
   const [sample, setSample] = React.useState(null)
   const [advanced, setAdvanced] = React.useState(false)
+  const version = useVersionInfo()
   React.useEffect(() => {
     if (!open || !settings) return
     const { image } = settings
-    setForm({ source: image.source ?? 'http', language: settings.language ?? 'auto', baseUrl: image.baseUrl, model: image.model, apiKey: '', size: image.size, quality: image.quality, toolSize: image.toolSize ?? '1536x1024', toolQuality: image.toolQuality ?? '', extra: image.extra, exportDir: settings.exportDir ?? '', generateImages: settings.generateImages !== false, imageCount: settings.imageCount, shotCount: settings.shotCount })
+    setForm({ source: image.source ?? 'http', protocol: image.protocol ?? 'openai', language: settings.language ?? 'auto', baseUrl: image.baseUrl, model: image.model, apiKey: '', size: image.size, quality: image.quality, toolSize: image.toolSize ?? '1536x1024', toolQuality: image.toolQuality ?? '', extra: image.extra, exportDir: settings.exportDir ?? '', generateImages: settings.generateImages !== false, imageCount: settings.imageCount, shotCount: settings.shotCount })
     setSample(null)
   }, [open, settings])
   if (!open || !form) return null
@@ -40,10 +45,10 @@ export function SettingsDialog() {
   const set = (key, value) => setForm(f => ({ ...f, [key]: value }))
   const payload = () => ({
     language: form.language,
-    image: { source: form.source, baseUrl: form.baseUrl, model: form.model, apiKey: form.apiKey, size: form.size, quality: form.quality, toolSize: form.toolSize, toolQuality: form.toolQuality, extra: form.extra },
+    image: { source: form.source, protocol: form.protocol, baseUrl: form.baseUrl, model: form.model, apiKey: form.apiKey, size: form.size, quality: form.quality, toolSize: form.toolSize, toolQuality: form.toolQuality, extra: form.extra },
     exportDir: form.exportDir, generateImages: form.generateImages, imageCount: Number(form.imageCount), shotCount: Number(form.shotCount),
   })
-  const activePreset = PRESETS.find(p => p.baseUrl && p.baseUrl === form.baseUrl)?.id ?? (form.baseUrl ? 'custom' : null)
+  const activePreset = PRESETS.find(p => p.baseUrl && p.baseUrl === form.baseUrl && (p.protocol ?? 'openai') === form.protocol)?.id ?? (form.baseUrl ? 'custom' : null)
   return (
     <Dialog title={t('设置')} onClose={close} width={520}>
       <form className="md-form" onSubmit={async (event) => {
@@ -80,10 +85,10 @@ export function SettingsDialog() {
           <span>{t('生图模型')}</span>
           <div className="md-presets">
             {PRESETS.map(preset => (
-              <button type="button" key={preset.id} className={activePreset === preset.id ? 'is-on' : ''} onClick={() => setForm(f => ({ ...f, baseUrl: preset.baseUrl, model: preset.model, size: preset.size, quality: preset.quality, extra: preset.extra }))}>{t(preset.label)}</button>
+              <button type="button" key={preset.id} className={activePreset === preset.id ? 'is-on' : ''} onClick={() => setForm(f => ({ ...f, protocol: preset.protocol ?? f.protocol, baseUrl: preset.baseUrl, model: preset.model, size: preset.size, quality: preset.quality, extra: preset.extra }))}>{t(preset.label)}</button>
             ))}
           </div>
-          <small>{t('支持任何兼容 OpenAI 图片接口（/images/generations）的服务。')}</small>
+          <small>{t('支持 OpenAI 兼容图片接口（/images/generations），以及阿里云百炼的千问同步接口和万相异步接口。')}</small>
         </div>
         <label className="md-field">
           <span>{t('接口地址')}</span>
@@ -99,10 +104,15 @@ export function SettingsDialog() {
           <small>{t('只保存在这台电脑上，不会写进内容数据，也不会被打包或发给模型。')}</small>
         </label>
         </> : null}
-        <label className="md-image-choice">
-          <input type="checkbox" checked={form.generateImages} onChange={e => set('generateImages', e.target.checked)} />
-          <span>{t('成稿时默认生成图片')}</span>
-        </label>
+        <div className="md-field">
+          <span>{t('成稿时默认')}</span>
+          <div className="md-presets" role="radiogroup" aria-label={t('成稿时默认')}>
+            {[[true, '同时生成图片'], [false, '只出文字']].map(([value, label]) => (
+              <button type="button" key={String(value)} role="radio" aria-checked={form.generateImages === value} className={form.generateImages === value ? 'is-on' : ''} onClick={() => set('generateImages', value)}>{t(label)}</button>
+            ))}
+          </div>
+          <small>{t('每次成稿前还可以单独改。')}</small>
+        </div>
         <div className="md-field-row">
           <label className="md-field"><span>{t('配图数量')}</span><input type="number" min="0" max="4" value={form.imageCount} onChange={e => set('imageCount', e.target.value)} /></label>
           <label className="md-field"><span>{t('分镜格数')}</span><input type="number" min="0" max="12" value={form.shotCount} onChange={e => set('shotCount', e.target.value)} /></label>
@@ -110,20 +120,43 @@ export function SettingsDialog() {
         <button type="button" className="md-advanced" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}><Icon name={advanced ? 'chevD' : 'chevR'} size={12} />{t('高级')}</button>
         {advanced ? (
           <>
-            {form.source === 'http' ? <div className="md-field-row">
-              <label className="md-field"><span>{t('尺寸')}</span><input value={form.size} onChange={e => set('size', e.target.value)} placeholder="1536x1024" /></label>
-              <label className="md-field"><span>{t('质量')}</span><input value={form.quality} onChange={e => set('quality', e.target.value)} placeholder="low / medium / high" /></label>
-            </div> : <div className="md-field-row">
+            {form.source === 'http' ? <>
+              <label className="md-field">
+                <span>{t('接口协议')}</span>
+                <select value={form.protocol} onChange={e => set('protocol', e.target.value)}>
+                  <option value="openai">{t('OpenAI 兼容')}</option>
+                  <option value="bailian">{t('阿里云百炼')}</option>
+                  <option value="wan">{t('百炼万相（异步）')}</option>
+                </select>
+              </label>
+              {form.protocol !== 'openai' ? (
+                <label className="md-field">
+                  <span>{t('尺寸')}</span>
+                  <input value={form.size} onChange={e => set('size', e.target.value)} placeholder={form.protocol === 'wan' ? '1280x1280' : '2688x1536'} />
+                  <small>{t('会转成百炼的 宽*高 格式；留空由模型自动选择。')}</small>
+                </label>
+              ) : (
+                <div className="md-field-row">
+                  <label className="md-field"><span>{t('尺寸')}</span><input value={form.size} onChange={e => set('size', e.target.value)} placeholder="1536x1024" /></label>
+                  <label className="md-field"><span>{t('质量')}</span><input value={form.quality} onChange={e => set('quality', e.target.value)} placeholder="low / medium / high" /></label>
+                </div>
+              )}
+              <label className="md-field">
+                <span>{t('附加参数（JSON）')}</span>
+                <input value={form.extra} onChange={e => set('extra', e.target.value)} placeholder={form.protocol === 'wan' ? '{"negative_prompt":"人物","prompt_extend":false}' : form.protocol === 'bailian' ? '{"prompt_extend":false,"watermark":false}' : '{"output_format":"jpeg"}'} />
+                {form.protocol === 'bailian' ? <small>{t('附加参数会并入百炼请求的 parameters。')}</small> : form.protocol === 'wan' ? <small>{t('附加参数会并入 parameters；negative_prompt 会放进 input。')}</small> : null}
+              </label>
+            </> : <div className="md-field-row">
               <label className="md-field"><span>{t('尺寸')}</span><select value={form.toolSize} onChange={e => set('toolSize', e.target.value)}><option value="">{t('工具默认')}</option>{['1024x1024', '1024x1536', '1536x1024', 'auto'].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
               <label className="md-field"><span>{t('质量')}</span><select value={form.toolQuality} onChange={e => set('toolQuality', e.target.value)}><option value="">{t('工具默认')}</option>{['low', 'medium', 'high', 'auto'].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
             </div>}
-            {form.source === 'http' ? <label className="md-field">
-              <span>{t('附加参数（JSON）')}</span>
-              <input value={form.extra} onChange={e => set('extra', e.target.value)} placeholder='{"output_format":"jpeg"}' />
-            </label> : null}
           </>
         ) : null}
         {sample ? <img className="md-test-sample" src={sample} alt={t('测试图')} /> : null}
+        <div className="md-version">
+          <span>{t('版本')} {version?.current ? `v${version.current}` : '—'}</span>
+          {version?.updateAvailable ? <a href={updateUrl(version)} target="_blank" rel="noreferrer">{t('有新版本 ↑ v{version}', { version: version.latest })}</a> : null}
+        </div>
         <div className="md-form-foot">
           <button type="button" className="md-btn" disabled={testing} onClick={async () => {
             setTesting(true)

@@ -447,7 +447,7 @@ export class NativeWork {
         request.data.language = work?.content?.language ?? work?.lang ?? 'zh'
         request.data.materialVersion = work?.content?.snapshot ?? null
         request.data.settings = { imageCount: settings.imageCount, shotCount: settings.shotCount, imageReady: this.ctx.mediaDesk.producer.ready(settings) }
-        request.data.format = data.format ?? work.production?.format ?? 'script'
+        request.data.format = data.format ?? work.production?.format ?? state.draftFormat ?? 'script'
         request.data.withImages = data.withImages ?? work.production?.withImages ?? settings.generateImages !== false
         request.instructions += request.data.format === 'article'
           ? ' Plan an article written in natural paragraphs.' : ' Plan a spoken script with one sentence per line.'
@@ -556,7 +556,7 @@ export class NativeWork {
           || Object.keys(row).some(key => !['id', 'status', 'reason'].includes(key)))) throw failure('native/rule-checks-required', 'Check every frozen writing rule exactly once; provide id, pass or not-applicable, and a concrete reason. Fix violations before submitting.', 400)
     }
     if (stage.kind === 'plan') this.ctx.mediaDesk.producer.validatePlan(result, stage.data.settings)
-    const allowed = { article: ['article', 'sources', 'ruleChecks'], style: ['name', 'summary', 'tone', 'sentences', 'opening', 'structure', 'words', 'avoid', 'samples'],
+    const allowed = { article: ['article', 'sources', 'ruleChecks'], style: ['name', 'summary', 'tone', 'sentences', 'opening', 'structure', 'logic', 'story', 'flow', 'words', 'avoid', 'samples'],
       rules: ['rules', 'ruleFiles', 'pendingReview'], plan: ['title', 'coverText', 'facts', 'outline', 'cover', 'characters', 'images', 'shots', 'sources'] }[stage.kind]
     if (!allowed || Object.keys(result).some(key => !allowed.includes(key))) throw failure('native/result-fields', 'Candidate contains unsupported fields', 400)
     if (result.pendingReview !== undefined && (!Array.isArray(result.pendingReview) || result.pendingReview.length > 24

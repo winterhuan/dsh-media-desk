@@ -19,9 +19,12 @@ export function normalizeStyle(raw, preferredName = '') {
     sentences: text(raw?.sentences, 200),
     opening: text(raw?.opening, 200),
     structure: text(raw?.structure, 200),
+    logic: text(raw?.logic, 200),
+    story: text(raw?.story, 200),
+    flow: text(raw?.flow, 200),
     words: list(raw?.words, 8, 20),
     avoid: list(raw?.avoid, 5, 40),
-    samples: list(raw?.samples, 3, 120),
+    samples: list(raw?.samples, 6, 160),
   }
 }
 
@@ -30,15 +33,18 @@ export function styleToVoice(style) {
   if (!style) return ''
   // 这段也会写进导出的 Skill 文件，英文界面时用英文标签
   const en = currentLang() === 'en'
-  const [overall, tone, sentences, opening, structure, words, avoid, samples, sep] = en
-    ? ['Overall: ', 'Tone: ', 'Sentences: ', 'Opening: ', 'Structure: ', 'Go-to words: ', 'Never: ', 'Sample lines (learn the rhythm, do not copy):', ', ']
-    : ['整体：', '语气：', '句式：', '开头：', '结构：', '常用词：', '绝不要：', '样句（学节奏，不要照抄）：', '、']
+  const [overall, tone, sentences, opening, structure, logic, story, flow, words, avoid, samples, sep] = en
+    ? ['Overall: ', 'Tone: ', 'Sentences: ', 'Opening: ', 'Structure: ', 'Reasoning: ', 'Storytelling: ', 'Transitions: ', 'Go-to words: ', 'Never: ', 'Sample lines (learn the rhythm, do not copy):', ', ']
+    : ['整体：', '语气：', '句式：', '开头：', '结构：', '逻辑：', '讲述：', '衔接：', '常用词：', '绝不要：', '样句（学节奏，不要照抄）：', '、']
   const lines = [
     style.summary && `${overall}${style.summary}`,
     style.tone && `${tone}${style.tone}`,
     style.sentences && `${sentences}${style.sentences}`,
     style.opening && `${opening}${style.opening}`,
     style.structure && `${structure}${style.structure}`,
+    style.logic && `${logic}${style.logic}`,
+    style.story && `${story}${style.story}`,
+    style.flow && `${flow}${style.flow}`,
     style.words?.length && `${words}${style.words.join(sep)}`,
     style.avoid?.length && `${avoid}${style.avoid.join(sep)}`,
     style.samples?.length && `${samples}\n${style.samples.map(row => `- ${row}`).join('\n')}`,
@@ -48,4 +54,9 @@ export function styleToVoice(style) {
 
 export function activeStyle(state) {
   return state.styles?.find(row => row.id === state.activeStyleId) ?? null
+}
+
+/** Normalize the default draft format for new works. */
+export function draftFormat(value) {
+  return value === 'article' ? 'article' : 'script'
 }

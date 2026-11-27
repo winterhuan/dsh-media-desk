@@ -186,9 +186,10 @@ test('原生工具选择文章与仅文字后固定选项，不自动生图，�
   const image = redrawn.items.find(row => row.id === work.id).production.images[0]
   assert.deepEqual(await readFile(join(image.media.notesRoot, image.media.relativePath)), png)
   await runtime.host('settings', { imageCount: 1, shotCount: 1 })
+  assert.equal((await runtime.host('ops', { ops: [{ op: 'set_format', format: 'article' }] })).status, 200)
   assert.equal((await runtime.host('produce', { id: 'seed_1' })).status, 200)
   const defaults = await waitState(runtime, state => state.items.find(row => row.id === 'seed_1')?.production?.status === 'done')
-  assert.equal(defaults.items.find(row => row.id === 'seed_1').production.format, 'script')
+  assert.equal(defaults.items.find(row => row.id === 'seed_1').production.format, 'article')
   assert.equal(defaults.items.find(row => row.id === 'seed_1').production.withImages, false)
   assert.equal(calls, 1, 'New work respects the saved text-only default')
 })

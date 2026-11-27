@@ -12,7 +12,7 @@ const { values } = parseArgs({ options: {
   'prompt-file': { type: 'string' }, out: { type: 'string' }, help: { type: 'boolean' },
 } })
 if (values.help) {
-  console.log('image-generation [--dotenv <.env>] [--model <model>] [--config <private-config.json>] --prompt-file <prompt.txt> --out <new-result-directory>\nDefault: IMAGE_URL and IMAGE_API_KEY from ~/.config/image-generation/.env (or XDG_CONFIG_HOME/image-generation/.env). Project .env or --dotenv overrides global values; exported environment takes precedence. IMAGE_MODEL or --model selects the model (default gpt-image-2). Explicit config overrides the endpoint and key source: baseUrl, model?, size?, quality?, extra?, apiKeyEnv? (default IMAGE_GENERATION_API_KEY) or private apiKey. No DSH or Media Desk dependency.')
+  console.log('image-generation [--dotenv <.env>] [--model <model>] [--config <private-config.json>] --prompt-file <prompt.txt> --out <new-result-directory>\nDefault: IMAGE_URL and IMAGE_API_KEY from ~/.config/image-generation/.env (or XDG_CONFIG_HOME/image-generation/.env). Project .env or --dotenv overrides global values; exported environment takes precedence. IMAGE_MODEL or --model selects the model (default gpt-image-2). Explicit config overrides the endpoint and key source: baseUrl, protocol? (openai/bailian/wan), model?, size?, quality?, extra?, apiKeyEnv? (default IMAGE_GENERATION_API_KEY) or private apiKey. No DSH or Media Desk dependency.')
 } else {
   let receipt, directory, apiKey
   try {

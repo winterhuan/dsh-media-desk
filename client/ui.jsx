@@ -139,7 +139,9 @@ export function FormDialog() {
         {dialog.fields.map(field => (
           field.type === 'hidden' ? <p key={field.name} className="md-muted">{field.label}</p> : <label key={field.name} className="md-field">
             <span>{field.label}</span>
-            {field.type === 'textarea' ? (
+            {field.type === 'checkbox' ? (
+              <input type="checkbox" checked={Boolean(values[field.name])} disabled={pending} onChange={e => setValues(v => ({ ...v, [field.name]: e.target.checked }))} />
+            ) : field.type === 'textarea' ? (
               <textarea rows={field.rows ?? 3} value={values[field.name] ?? ''} placeholder={field.placeholder} required={field.required} disabled={pending} onChange={e => setValues(v => ({ ...v, [field.name]: e.target.value }))} />
             ) : field.type === 'select' ? (
               <select value={values[field.name] ?? ''} required={field.required} disabled={pending} onChange={e => setValues(v => ({ ...v, [field.name]: e.target.value }))}>

@@ -4,7 +4,7 @@
 
 ## 研究与策划
 
-Read writing preferences before planning. Research the relevant Wiki with llm-wiki, verify sources and prepare a production plan. Use selected material, style and active rules within their scope. Return dated sources and evidence limits.
+Read writing preferences before planning. Research the relevant Wiki with llm-wiki, verify sources and prepare a production plan. Use selected material, style and active rules within their scope. Read the selected author sample and follow its expression, sentence breaks, reasoning, storytelling and transitions; do not copy its claims or wording. Return dated sources and evidence limits.
 
 按证据展开机制、权衡与限制；参数、引用和实验结论要能回到来源。翻译引用标明意译，不冒充原话；缺失信息保留未知，不虚构个人实测或经历。标题与篇幅遵循本次请求、体裁及适用偏好。
 

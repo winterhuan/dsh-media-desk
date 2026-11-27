@@ -50,14 +50,16 @@
     "watch": "node scripts/build.mjs --watch",
     "test": "node --test --test-concurrency=2 test/*.test.js",
     "assets": "python3 scripts/gen-assets.py",
-    "clean": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\""
+    "clean": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\"",
+    "index": "node scripts/build-index.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-client-ui-conversation": "0.2.2-rc.5",
     "@deepseek-ai/dsh-client-ui-workspace": "0.2.2-rc.5",
     "@deepseek-ai/dsh-llm": "0.2.2-rc.5",
     "esbuild": "^0.25.10",
-    "ws": "8.18.3"
+    "ws": "8.18.3",
+    "@deepseek-ai/dsh-plugin-market-index": "0.2.2-rc.5"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "~4.1.0",

@@ -96,32 +96,56 @@ function ProgressCard({ production, live, settings }) {
   )
 }
 
+/** 灵感的正文：墙上卡片里看得见的那段，进了工作区也要在。长的先收起几行。 */
+function IdeaBody({ item, disabled }) {
+  const body = item.body ?? ''
+  const long = body.length > 90 || body.split('\n').length > 4
+  const [open, setOpen] = React.useState(false)
+  React.useEffect(() => setOpen(false), [item.id])
+  if (!body) return null
+  return (
+    <div className="md-idea-body-wrap">
+      <div className={`md-idea-body-clip ${long && !open ? 'is-clipped' : ''}`} onFocus={() => setOpen(true)}>
+        <AutoText key={item.id} className="md-idea-body" label={t('灵感正文')} value={body} content={item.content} disabled={disabled} onCommit={(next, version) => dispatchOps([{ op: 'update_item', id: item.id, body: next }], { label: t('修改正文'), silent: true, expectedContent: version ? { [item.id]: version } : {} })} />
+      </div>
+      {long ? <button type="button" className="md-link-btn" aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? t('收起') : t('展开全文')}</button> : null}
+    </div>
+  )
+}
+
+const FORMAT_OPTIONS = [
+  { id: 'script', label: '脚本', hint: '口播脚本：一句话一行，一段一段' },
+  { id: 'article', label: '文章', hint: '文章：一个一个自然段' },
+]
+
 /** 对话栏顶部：这条灵感，以及唯一的入口。 */
 function IdeaCard({ item, live, settings, choices, onChoices }) {
   const production = item.production
   const running = production?.status === 'running'
   const styles = useDesk(s => s.state.styles ?? [])
   const activeId = useDesk(s => s.state.activeStyleId)
+  const withImages = choices.withImages
+  const canStart = !production || !['running', 'done'].includes(production.status)
+  const format = choices.format
   return (
     <div className="md-idea-card">
       <span className="md-idea-label">{t('灵感')} · {fmtDate(item.createdAt)}</span>
       <AutoText key={item.id} className="md-idea-text" label={t('灵感')} value={item.title} content={item.content} disabled={running || item.content && item.content.status !== 'ready'} onCommit={(title, version) => dispatchOps([{ op: 'update_item', id: item.id, title }], { label: t('修改灵感'), silent: true, expectedContent: version ? { [item.id]: version } : {} })} />
-      {!running ? <>
-        <label className="md-style-pick">
-          <span>{t('体裁')}</span>
-          <select aria-label={t('体裁')} value={choices.format} onChange={e => onChoices({ format: e.target.value })}>
-            <option value="script">{t('脚本')}</option>
-            <option value="article">{t('文章')}</option>
-          </select>
-        </label>
-        <label className="md-image-choice">
-          <input type="checkbox" checked={choices.withImages} onChange={e => onChoices({ withImages: e.target.checked })} />
-          <span>{t('生成图片')}</span>
-        </label>
-        {production && (production.format ?? 'script') !== choices.format ? <p className="md-idea-hint">{t('新体裁在重新成稿后生效')}</p> : null}
-      </> : null}
+      <IdeaBody item={item} disabled={running || Boolean(item.content && item.content.status !== 'ready')} />
       {!running ? (
-        <label className="md-style-pick">
+        <div className="md-style-pick" role="radiogroup" aria-label={t('体裁')}>
+          <span>{t('体裁')}</span>
+          <div className="md-format-seg">
+            {FORMAT_OPTIONS.map(option => (
+              <button type="button" key={option.id} role="radio" aria-checked={format === option.id} className={format === option.id ? 'is-on' : ''} title={t(option.hint)}
+                onClick={() => { if (format !== option.id) onChoices({ format: option.id }) }}>{t(option.label)}</button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {!running && production?.status === 'done' && (production.format ?? 'script') !== format ? <p className="md-idea-hint">{t('这篇是按另一种体裁写的，重新成稿后生效。')}</p> : null}
+      {!running ? (
+        <label className="md-style-pick is-follow">
           <span>{t('风格')}</span>
           <select aria-label={t('风格')} value={activeId ?? ''} onChange={e => dispatchOps([{ op: 'set_style', id: e.target.value || null }], { label: t('切换风格'), silent: true })}>
             <option value="">{t('默认')}</option>
@@ -130,10 +154,14 @@ function IdeaCard({ item, live, settings, choices, onChoices }) {
           </select>
         </label>
       ) : null}
-      {!production || !['running', 'done'].includes(production.status) ? <button type="button" className="md-go" onClick={() => runProduce(item.id, choices)}>{t('一键成稿')}</button> : null}
+      {canStart ? <div className="md-go-row">
+        <button type="button" className="md-go" onClick={() => runProduce(item.id, choices)}>{t('一键成稿')}</button>
+        <label className="md-go-option"><input type="checkbox" checked={withImages} onChange={e => onChoices({ withImages: e.target.checked })} />{t('生成图片')}</label>
+      </div> : null}
       {running ? <ProgressCard production={{ ...production, id: item.id }} live={live} settings={settings} /> : null}
       {production?.status === 'failed' ? <p className="md-idea-hint is-error">{production.error}</p> : null}
-      {!running && !settings?.imageReady ? <p className="md-idea-hint">{t('接入生图模型后，封面和分镜也会画好。')}<button type="button" onClick={() => setDesk({ settingsOpen: true })}>{t('去接入')}</button></p> : null}
+      {canStart && !withImages ? <p className="md-idea-hint">{t('这次只出文字版，之后仍可以单张补画。')}</p> : null}
+      {canStart && withImages && !settings?.imageReady ? <p className="md-idea-hint">{t('接入生图模型后，封面和分镜也会画好。')}<button type="button" onClick={() => setDesk({ settingsOpen: true })}>{t('去接入')}</button></p> : null}
       {production?.notice ? <p className="md-idea-hint">{production.notice}</p> : null}
     </div>
   )
@@ -170,7 +198,7 @@ function HeroTile({ item, onView, choices }) {
   const images = production?.images ?? []
   const done = ['done', 'partial', 'interrupted'].includes(production?.status)
   const pictures = [production?.cover, ...images].filter(a => a?.src).length
-  const showFigures = settings?.imageReady || images.some(a => a?.src)
+  const showFigures = (settings?.imageReady && production?.withImages !== false) || images.some(a => a?.src)
   const [saving, setSaving] = React.useState(false)
   const copy = async () => {
     await navigator.clipboard.writeText(`# ${item.title || production.title}\n\n${article}`)
@@ -185,8 +213,10 @@ function HeroTile({ item, onView, choices }) {
     dialog: {
       title: t('重新成稿'),
       submitLabel: t('重新生成'),
-      fields: [{ name: 'note', label: t('现在的文章、封面和分镜会被替换，也会再消耗一次模型额度。'), type: 'hidden' }],
-      onSubmit: () => runProduce(item.id, choices),
+      initial: { withImages: choices.withImages },
+      fields: [{ name: 'note', label: t('现在的文章、封面和分镜会被替换，也会再消耗一次模型额度。'), type: 'hidden' },
+        { name: 'withImages', label: t('同时生成封面、配图和分镜图'), type: 'checkbox' }],
+      onSubmit: values => runProduce(item.id, { ...choices, withImages: values.withImages }),
     },
   })
   const figures = images.length ? images : [null, null].slice(0, settings?.imageCount ?? 2)
@@ -233,7 +263,7 @@ function HeroTile({ item, onView, choices }) {
 }
 
 /** 把配图插回文章：优先放到对应小标题那一节的末尾。 */
-function ArticleBody({ production, text, onView }) {
+function ArticleBody({ production, text, onView, proseClass = 'md-prose' }) {
   const sections = React.useMemo(() => text.split(/\n(?=##\s)/).map(part => ({ text: part, heading: /^##\s+(.+)/.exec(part)?.[1]?.trim() ?? '' })), [text])
   const images = production?.images ?? []
   const placed = React.useMemo(() => {
@@ -252,7 +282,7 @@ function ArticleBody({ production, text, onView }) {
       {sections.map((section, index) => (
         <React.Fragment key={index}>
           {/* renderMarkdown 会先转义，模型输出里的 HTML 不会执行 */}
-          <div className="md-prose" dangerouslySetInnerHTML={{ __html: renderMarkdown(section.text) }} />
+          <div className={proseClass} dangerouslySetInnerHTML={{ __html: renderMarkdown(section.text) }} />
           {(placed.get(index) ?? []).map(({ image, i }) => (
             <figure key={i} className="md-article-figure">
               <Plate asset={image} alt={image.caption} onOpen={() => onView(`image:${i}`)} />
@@ -309,7 +339,7 @@ function ArticleTile({ item, open, onToggle, onView, tileRef }) {
     } finally { setSaving(false) }
   }
   const copy = async () => {
-    await navigator.clipboard.writeText(article)
+    await navigator.clipboard.writeText(`# ${item.title || production?.title}\n\n${article}`)
     toast(content ? t('正文已复制') : t('脚本已复制'))
   }
   const learnEdits = () => setDesk({ dialog: {
@@ -390,7 +420,8 @@ function ArticleTile({ item, open, onToggle, onView, tileRef }) {
         <textarea className="md-article-edit" aria-label={content ? t('正文') : t('脚本')} value={editor.text} disabled={saving} onChange={e => setEditor(current => ({ ...current, text: e.target.value }))} />
       ) : article ? (
         <div className="md-article-scroll" ref={scroller} onMouseUp={onMouseUp} onScroll={() => setPicked(null)}>
-          {open ? <ArticleBody production={production} text={article} onView={onView} /> : <div className="md-prose" dangerouslySetInnerHTML={{ __html: renderMarkdown(article) }} />}
+          <h1 className="md-article-title">{item.title || production?.title}</h1>
+          {open ? <ArticleBody production={production} text={article} onView={onView} proseClass={`md-prose is-${production?.format === 'article' ? 'article' : 'script'}`} /> : <div className={`md-prose is-${production?.format === 'article' ? 'article' : 'script'}`} dangerouslySetInnerHTML={{ __html: renderMarkdown(article) }} />}
         </div>
       ) : content ? ready && <p className="md-note-status md-muted">{t('正文为空，点击直接修改开始写作')}</p> : (
         <div className={`md-skeleton ${running ? '' : 'is-still'}`} aria-hidden="true">{Array.from({ length: 12 }, (_, i) => <i key={i} />)}</div>
@@ -596,8 +627,12 @@ export function Studio({ openSession, retainSession, SessionProvider, renderSlot
   const ref = React.useRef(null)
   const production = item?.production
   const [selected, setSelected] = React.useState(null)
-  const choices = selected?.workId === id ? selected : { format: production?.format ?? 'script', withImages: production?.withImages ?? settings?.generateImages !== false }
-  const choose = patch => setSelected({ ...choices, ...patch, workId: id })
+  const defaultFormat = useDesk(s => s.state?.draftFormat ?? 'script')
+  const choices = selected?.workId === id ? selected : { format: production?.format ?? defaultFormat, withImages: production?.withImages ?? settings?.generateImages !== false }
+  const choose = patch => {
+    setSelected({ ...choices, ...patch, workId: id })
+    if (patch.format) dispatchOps([{ op: 'set_format', format: patch.format }], { label: t('切换体裁'), silent: true })
+  }
   const running = production?.status === 'running'
   const watching = running || [production?.cover, ...(production?.images ?? []), ...(production?.shots ?? [])].some(isBusy)
 

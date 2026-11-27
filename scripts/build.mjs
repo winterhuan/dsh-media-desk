@@ -14,7 +14,7 @@ const options = {
   jsx: 'transform',
   jsxFactory: 'React.createElement',
   jsxFragment: 'React.Fragment',
-  external: ['react'],
+  external: ['react', 'react-dom'],
   loader: { '.css': 'text' },
   minify: !process.argv.includes('--watch'),
   legalComments: 'none',

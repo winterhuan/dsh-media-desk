@@ -78,6 +78,12 @@ function TrendChart({ daily: rows, field }) {
   )
 }
 
+/** 说明趋势图的口径：导入的数据是累计数，记在发布那天。 */
+function TrendNote({ skipped }) {
+  const text = t('导入的内容按发布日记累计数') + (skipped ? t('，{n} 条重复的手动数据没有再算一遍', { n: skipped }) : '')
+  return <span className="md-tile-meta" title={text}>{text}</span>
+}
+
 function addMetric(items) {
   setDesk({
     dialog: {
@@ -204,6 +210,7 @@ export function InsightsView() {
         <section className="md-tile md-i-trend">
           <header className="md-tile-head">
             <h2>{hasViews ? t('每日播放') : t('每日互动')}</h2>
+            {data.imported ? <TrendNote skipped={data.skipped} /> : null}
             <span className="md-grow" />
             <Segmented label={t('显示方式')} value={show} onChange={setShow} options={[{ value: 'chart', label: t('图') }, { value: 'table', label: t('表') }]} />
           </header>

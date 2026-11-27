@@ -70,7 +70,8 @@ test('独立生成、改稿、规则和素材可由插件继续使用；插件�
   await standalone('rules', { result: { rules: [proposal, proposal] }, learningSource: source })
   const styles = await standalone('read', { kind: 'preferences' })
   const activeStyleId = styles.style?.id ?? null
-  await standalone('style', { result: { name: '样文风格', summary: '逐段展开机制', samples: ['作者原句。'] } })
+  const styleDetails = { logic: '先给证据再归纳', story: '从具体场景切入', flow: '用问题连接段落' }
+  await standalone('style', { result: { name: '样文风格', summary: '逐段展开机制', ...styleDetails, samples: ['作者原句。'] } })
   assert.equal((await standalone('read', { kind: 'preferences' })).style?.id ?? null, activeStyleId)
   const png = join(runtime.root, 'cover.png')
   await writeFile(png, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3foAAAAASUVORK5CYII=', 'base64'))
@@ -79,6 +80,8 @@ test('独立生成、改稿、规则和素材可由插件继续使用；插件�
   await runtime.start()
   const plugin = caller(runtime, 'plugin')
   const state = (await runtime.host('state')).value.state
+  const extractedStyle = state.styles.find(row => row.name === '样文风格')
+  for (const [key, value] of Object.entries(styleDetails)) assert.equal(extractedStyle[key], value)
   const work = state.items.find(row => row.id === id)
   assert.equal(work.body, edited.work.body)
   assert.equal(work.production.status, 'done')

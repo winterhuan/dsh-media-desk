@@ -87,6 +87,9 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: 0.2.2-rc.5
         version: 0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.5(@deepseek-ai/cordis@4.1.0))
+      '@deepseek-ai/dsh-plugin-market-index':
+        specifier: 0.2.2-rc.5
+        version: 0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)
       esbuild:
         specifier: ^0.25.10
         version: 0.25.10
@@ -483,6 +486,11 @@ packages:
     peerDependencies:
       '@deepseek-ai/cordis': ~4.1.0
       '@deepseek-ai/dsh-system-prompt': 0.2.2-rc.5
+
+  '@deepseek-ai/dsh-plugin-market-index@0.2.2-rc.5':
+    resolution: {integrity: sha512-wEjqR2zu9vbjujTMcQ0uEivym7jI1JLqXLLDRVXfn36NAsRYPVWAKsqrcRKLrFGqMV7Ea21p4m282d8semOCyA==}
+    peerDependencies:
+      '@deepseek-ai/cordis': ~4.1.0
 
   '@deepseek-ai/dsh-sandbox-policy@0.2.2-rc.5':
     resolution: {integrity: sha512-tk68JV2em5UOkVlXUrfcZJbSp12ncQJZ5nuJbBrLtNIr5tbnVBx3Hkc6EBCnBLNeRaK1QvMaca+OA3GG4YglEw==}
@@ -1750,6 +1758,12 @@ snapshots:
       '@deepseek-ai/cordis': 4.1.0(@deepseek-ai/cordis-plugin-include@1.1.0)(@deepseek-ai/cordis-plugin-loader@1.1.0)
       '@deepseek-ai/dsh-system-prompt': 0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-llm@0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)))(@deepseek-ai/dsh-scope@0.2.2-rc.5(@deepseek-ai/cordis@4.1.0))
       '@deepseek-ai/schemastery': 3.19.0
+
+  '@deepseek-ai/dsh-plugin-market-index@0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)':
+    dependencies:
+      '@deepseek-ai/cordis': 4.1.0(@deepseek-ai/cordis-plugin-include@1.1.0)(@deepseek-ai/cordis-plugin-loader@1.1.0)
+      '@deepseek-ai/dsh-package-manifest': 0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)
+      semver: 7.8.6
 
   '@deepseek-ai/dsh-sandbox-policy@0.2.2-rc.5(a3a37104bbce23b73e3db6e2907fe9da)':
     dependencies:

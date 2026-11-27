@@ -33,6 +33,8 @@ dsh --profile media-desk-dev --port 0 --no-open
 
 从侧栏打开「自媒体工作台」。安装包包含 Host 入口和浏览器产物。上游 npm 包与本 fork 共用面板 ID、路由和数据；同一个 profile 只启用其中一个。工作台状态和设置保存在 `<DSH_HOME>/media-desk/`，默认 home 为 `~/.dsh`；已登记的作品文字位于 Wiki Notes。[使用指南](GUIDE.zh.md)说明五个视图、原生输入、图片、恢复和文件导出。
 
+工作台可选注册到 better-sidebar。顶栏与设置显示本 fork 的 Git 发布版本：成功检查缓存一小时，失败后可在 30 秒后重试，不自动安装更新。本仓库的[市场索引](index.json)列出固定 Git 发布包；`pnpm run index` 从对应的既有发布标签重新生成索引。[上游介绍页](site/index.html)保留原项目说明，并提供本 fork 的入口。
+
 <a id="shared-skill"></a>
 ### 共用 Media Desk skill
 

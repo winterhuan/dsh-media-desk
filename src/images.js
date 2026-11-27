@@ -7,7 +7,7 @@ export function generateImage(image, prompt, options = {}) { return generate(ima
 /** Validate incoming image bytes before Media Desk registers them. */
 export function imageBuffer(buffer) { return validate(buffer, tr) }
 /** Resolve image response paths using the shared transport implementation. */
-export { imageUrlCandidates } from '../skills/image-generation/scripts/http.mjs'
+export { imageUrlCandidates, bailianEndpoint, wanSubmitEndpoint, wanTaskEndpoint } from '../skills/image-generation/scripts/http.mjs'
 
 const COVER_STYLE = 'Editorial cover image, striking composition with calm negative space in the lower third, refined and cinematic, no text, no letters, no logo.'
 const FIGURE_STYLE = 'Editorial article illustration, refined and consistent with a modern magazine, no text, no letters, no logo.'

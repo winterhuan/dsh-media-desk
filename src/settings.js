@@ -5,7 +5,7 @@ import { tr } from './i18n.js'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 
 const DEFAULTS = {
-  image: { source: 'http', baseUrl: '', model: '', apiKey: '', size: '1536x1024', quality: '', toolSize: '1536x1024', toolQuality: '', extra: '' },
+  image: { source: 'http', protocol: 'openai', baseUrl: '', model: '', apiKey: '', size: '1536x1024', quality: '', toolSize: '1536x1024', toolQuality: '', extra: '' },
   voice: '',
   exportDir: '',
   generateImages: true,
@@ -64,6 +64,10 @@ export class Settings {
       if (!['http', 'tool'].includes(image.source)) throw Object.assign(new Error(tr('生图来源无效')), { status: 400 })
       next.image.source = image.source
     }
+    if (image.protocol !== undefined) {
+      if (!['openai', 'bailian', 'wan'].includes(image.protocol)) throw Object.assign(new Error(tr('生图协议无效')), { status: 400 })
+      next.image.protocol = image.protocol
+    }
     for (const key of ['model', 'size', 'quality']) {
       if (typeof image[key] === 'string') next.image[key] = image[key].trim().slice(0, 200)
     }
@@ -77,7 +81,15 @@ export class Settings {
       }
     }
     if (typeof image.baseUrl === 'string') {
-      const url = image.baseUrl.trim().replace(/\/+$/, '').replace(/\/images\/generations$/, '')
+      let url = image.baseUrl.trim().replace(/\/+$/, '')
+      if (next.image.protocol === 'bailian') {
+        // 百炼可能被贴成完整端点或带 /api/v1，统一存域名
+        url = url.replace(/\/api\/v1\/services\/aigc\/multimodal-generation\/generation$/i, '').replace(/\/api\/v1$/i, '')
+      } else if (next.image.protocol === 'wan') {
+        url = url.replace(/\/api\/v1\/(?:services\/aigc\/text2image\/image-synthesis|tasks\/[^/]+)$/i, '').replace(/\/api\/v1$/i, '')
+      } else {
+        url = url.replace(/\/images\/generations$/, '')
+      }
       if (url && !/^https?:\/\/[^\s]+$/i.test(url)) throw Object.assign(new Error(tr('接口地址要以 http:// 或 https:// 开头')), { status: 400 })
       next.image.baseUrl = url
     }

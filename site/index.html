@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自媒体工作台 · DeepSeek Harness 插件</title>
+<meta name="description" content="自媒体工作台是 DeepSeek Harness 的一个插件：在里面记灵感，让它把灵感写成脚本，配上标题、封面、配图和分镜。这里有三种安装方法。">
+<meta property="og:title" content="自媒体工作台 · DeepSeek Harness 插件">
+<meta property="og:description" content="DeepSeek Harness 的一个插件，用来记灵感、写脚本、做封面和分镜。这里有三种安装方法。">
+<meta property="og:image" content="https://bozhufarm.com/dsh/assets/hero-zh-light.webp">
+<script>if(!/\/$|\.html$/.test(location.pathname))location.replace(location.pathname+"/"+location.search+location.hash)</script>
+<meta name="color-scheme" content="light dark">
+<style>
+:root{
+  --bg:#fbfaf8; --ink:#17171a; --soft:#5d5d66; --faint:#8e8e98;
+  --card:#ffffff; --line:#e7e5e1; --code-bg:#17171a; --code-ink:#f3f2ee; --code-dim:#8e8e98;
+  --accent:#5b4bdb; --accent-soft:#eeebff; --ok:#1f9d63;
+  --glow-a:#e4defd; --glow-b:#ffe6dc; --shadow:0 18px 50px -20px rgba(40,30,90,.28);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#111114; --ink:#f1f0ec; --soft:#a9a9b3; --faint:#74747e;
+    --card:#1a1a1f; --line:#2a2a31; --code-bg:#000; --code-ink:#f3f2ee; --code-dim:#7d7d88;
+    --accent:#a79bff; --accent-soft:#25213f; --ok:#4fd195;
+    --glow-a:#2a2350; --glow-b:#3a2420; --shadow:0 18px 50px -20px rgba(0,0,0,.7);
+  }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","HarmonyOS Sans SC","Microsoft YaHei","Noto Sans SC",sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:inherit}
+img{max-width:100%;height:auto;display:block}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+code,.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+
+/* 顶栏 */
+.top{display:flex;align-items:center;justify-content:space-between;padding:20px 0}
+.brand{font-weight:700;font-size:17px;letter-spacing:.02em;text-decoration:none}
+.brand small{font-weight:500;color:var(--faint);margin-left:8px;font-size:13px}
+.nav{display:flex;gap:22px;font-size:14px;color:var(--soft)}
+.nav a{text-decoration:none}
+.nav a:hover{color:var(--ink)}
+
+/* 首屏 */
+.hero-bg{background:
+  radial-gradient(900px 480px at 85% -10%,var(--glow-a),transparent 70%),
+  radial-gradient(700px 420px at 0% 60%,var(--glow-b),transparent 70%)}
+.hero{padding:48px 0 0;text-align:center}
+.pill{display:inline-block;font-size:13px;color:var(--soft);border:1px solid var(--line);
+  background:var(--card);border-radius:999px;padding:4px 14px;margin-bottom:22px}
+h1{font-size:clamp(40px,7vw,68px);line-height:1.12;letter-spacing:-.01em;margin:0 0 18px;font-weight:800}
+.lead{font-size:clamp(17px,2.2vw,21px);color:var(--soft);max-width:640px;margin:0 auto 34px}
+
+/* 大号安装框 */
+.install{max-width:760px;margin:0 auto;text-align:left}
+.switch{display:inline-flex;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:3px;margin-bottom:12px}
+.switch button{border:0;background:transparent;color:var(--soft);font:inherit;font-size:14px;
+  padding:5px 16px;border-radius:999px;cursor:pointer}
+.switch button[aria-pressed="true"]{background:var(--ink);color:var(--bg);font-weight:600}
+.install-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.install-head span{font-size:14px;color:var(--soft);margin-bottom:12px}
+.cmd{display:flex;align-items:center;gap:12px;background:var(--code-bg);color:var(--code-ink);
+  border-radius:16px;padding:16px 16px 16px 22px;box-shadow:var(--shadow)}
+.cmd code{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;font-size:15px;scrollbar-width:none}
+.cmd code::-webkit-scrollbar{display:none}
+.cmd code .p{color:var(--code-dim);user-select:none}
+.cmd.big{padding:22px 18px 22px 26px;border-radius:20px}
+.cmd.big code{font-size:clamp(15px,2.5vw,22px);font-weight:600}
+.copy{flex:none;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.08);color:#fff;
+  font:inherit;font-size:13px;border-radius:10px;padding:6px 14px;cursor:pointer;white-space:nowrap}
+.copy:hover{background:rgba(255,255,255,.18)}
+.copy.done{background:var(--ok);border-color:var(--ok)}
+.under{font-size:14px;color:var(--faint);margin:14px 2px 0;text-align:center}
+.under a{color:var(--soft)}
+.shot{display:block;margin:48px auto 0;max-width:1080px;border-radius:22px;overflow:hidden}
+.shot img,.pic img{width:100%;height:auto}
+
+/* 段落 */
+section{padding:88px 0 0}
+h2{font-size:clamp(28px,4.2vw,40px);line-height:1.2;margin:0 0 10px;font-weight:800;text-align:center}
+.sub{color:var(--soft);text-align:center;margin:0 auto 40px;max-width:600px}
+
+/* 三种安装方式 */
+.ways{display:grid;gap:18px}
+.way>*,.steps li{min-width:0}
+.way{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:28px;
+  display:grid;grid-template-columns:64px 1fr;gap:8px 20px}
+.num{width:56px;height:56px;border-radius:16px;background:var(--accent-soft);color:var(--accent);
+  font-size:26px;font-weight:800;display:grid;place-items:center}
+.way h3{margin:0;font-size:22px;line-height:1.3}
+.way h3 em{font-style:normal;font-size:12px;font-weight:600;color:var(--accent);background:var(--accent-soft);
+  border-radius:999px;padding:2px 10px;margin-left:8px;vertical-align:3px}
+.way .who{color:var(--soft);margin:2px 0 0;font-size:15px}
+.way .body{grid-column:2}
+.steps{margin:16px 0 0;padding:0;list-style:none;counter-reset:s}
+.steps li{counter-increment:s;position:relative;padding:0 0 14px 34px}
+.steps li:last-child{padding-bottom:0}
+.steps li::before{content:counter(s);position:absolute;left:0;top:3px;width:22px;height:22px;border-radius:50%;
+  border:1.5px solid var(--ink);font-size:12px;font-weight:700;display:grid;place-items:center}
+.steps .cmd{margin-top:10px;box-shadow:none}
+.steps code.in,.note code,.faq code{background:var(--accent-soft);color:var(--accent);padding:1px 7px;border-radius:6px;font-size:.9em}
+.say{margin-top:10px;display:flex;align-items:center;gap:12px;border:1.5px dashed var(--line);border-radius:16px;padding:14px 14px 14px 18px}
+.say p{flex:1;margin:0;min-width:0;word-break:break-all}
+.say .copy{border-color:var(--line);background:var(--ink);color:var(--bg)}
+.say .copy.done{background:var(--ok);border-color:var(--ok);color:#fff}
+.btn{display:inline-block;background:var(--ink);color:var(--bg);text-decoration:none;font-weight:600;
+  border-radius:12px;padding:9px 18px;margin-top:10px;font-size:15px}
+.btn.ghost{background:transparent;color:var(--ink);border:1.5px solid var(--ink)}
+.note{margin-top:22px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px 24px;font-size:15px;color:var(--soft)}
+.note b{color:var(--ink)}
+.note ul{margin:8px 0 0;padding-left:20px}
+details{margin-top:14px;font-size:15px;color:var(--soft)}
+summary{cursor:pointer;color:var(--ink);font-weight:600}
+details .cmd{margin-top:10px;box-shadow:none}
+
+/* 功能 */
+.feat{margin-bottom:64px;text-align:center}
+.feat .txt{max-width:600px;margin:0 auto 22px}
+.feat .pic{display:block;border-radius:22px;overflow:hidden}
+.feat h3{font-size:26px;margin:0 0 8px}
+.feat p{margin:0;color:var(--soft)}
+.tag{font-size:13px;color:var(--accent);font-weight:700;letter-spacing:.08em}
+
+/* 花钱 */
+.cost{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.cost div{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px}
+.cost h3{margin:0 0 6px;font-size:18px}
+.cost p{margin:0;color:var(--soft);font-size:15px}
+
+/* 博主农场 */
+.farm{display:grid;grid-template-columns:150px 1fr;gap:28px;align-items:center;background:var(--card);
+  border:1px solid var(--line);border-radius:22px;padding:28px}
+.farm img{border-radius:16px;width:100%;aspect-ratio:1/1;object-fit:cover}
+.farm h3{margin:0 0 6px;font-size:22px}
+.farm p{margin:0;color:var(--soft)}
+
+footer{padding:72px 0 48px;text-align:center;color:var(--faint);font-size:13px}
+footer a{color:var(--soft)}
+footer p{margin:4px 0}
+
+@media (max-width:720px){
+  .wrap{padding:0 16px}
+  .nav{gap:14px}.nav .hide{display:none}
+  .hero{padding-top:28px}
+  section{padding-top:64px}
+  .way{grid-template-columns:1fr;padding:22px}
+  .way .body{grid-column:1}
+  .num{width:44px;height:44px;font-size:20px;border-radius:12px}
+  .feat{margin-bottom:44px}
+  .shot,.feat .pic{border-radius:12px}
+  .cost{grid-template-columns:1fr}
+  .farm{grid-template-columns:84px 1fr;gap:16px;padding:20px}
+  .cmd.big{padding:16px 12px 16px 16px}
+}
+</style>
+</head>
+<body>
+
+<div class="hero-bg">
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="#">自媒体工作台<small id="ver"></small></a>
+    <nav class="nav">
+      <a href="#install">怎么安装</a>
+      <a href="#features" class="hide">装好以后</a>
+      <a href="https://github.com/woniuniuniu/dsh-media-desk">GitHub</a>
+      <a href="https://www.npmjs.com/package/dsh-media-desk" class="hide">npm</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <span class="pill">DeepSeek Harness 插件 · 免费开源</span>
+    <h1>自媒体工作台</h1>
+    <p class="lead">这是 DeepSeek Harness 的一个插件。装上以后，侧栏里会多一个页面：你在里面记灵感，它帮你把一条灵感写成脚本，再配上标题、封面、配图和分镜。</p>
+
+    <div class="install">
+      <div class="install-head">
+        <span>安装：复制这一行，粘到终端里回车</span>
+        <div class="switch" role="group" aria-label="选择你用的版本">
+          <button type="button" data-profile="desktop" aria-pressed="true">Mac 桌面版</button>
+          <button type="button" data-profile="web" aria-pressed="false">网页版</button>
+        </div>
+      </div>
+      <div class="cmd big">
+        <code><span class="p">$ </span><span data-cmd="npm">dsh plugin --profile desktop add dsh-media-desk</span></code>
+        <button class="copy" type="button">复制</button>
+      </div>
+      <p class="under">不想用终端的话，下面还有<a href="#install">另外两种安装方法</a>。</p>
+    </div>
+
+    <picture class="shot">
+      <source media="(prefers-color-scheme:dark)" srcset="assets/f-home-dark.webp">
+      <img src="assets/f-home-light.webp" width="2560" height="1000" alt="自媒体工作台的灵感墙">
+    </picture>
+  </div>
+</div>
+</div>
+
+<aside style="padding:16px;text-align:center">此页介绍原作者版本。winter fork 使用原生会话与 Notes，安装请阅读 <a href="https://github.com/winterhuan/dsh-media-desk#readme">winter fork 说明</a>。</aside>
+<main class="wrap">
+
+<section id="install">
+  <h2>怎么安装</h2>
+  <p class="sub">一共三种方法，装出来是一样的。需要 DeepSeek Harness <b>0.2.1-rc.5</b> 及以上的 0.2.x 版本。</p>
+
+  <div class="ways">
+
+    <article class="way">
+      <div class="num">1</div>
+      <div>
+        <h3>方法一：用 npm 安装<em>推荐</em></h3>
+        <p class="who">在终端里跑一行命令。以后要更新，重跑这一行就行。</p>
+      </div>
+      <div class="body">
+        <ol class="steps">
+          <li><span data-when="desktop">先把 DeepSeek Harness 完全退出（按 ⌘Q）。</span><span data-when="web" hidden>打开终端。</span></li>
+          <li>在终端里粘贴这一行，回车：
+            <div class="cmd"><code><span class="p">$ </span><span data-cmd="npm">dsh plugin --profile desktop add dsh-media-desk</span></code><button class="copy" type="button">复制</button></div>
+          </li>
+          <li><span data-when="desktop">重新打开 DeepSeek Harness，侧栏里就有「自媒体工作台」了。</span><span data-when="web" hidden>重新启动 <code class="in">dsh web</code>，侧栏里就有「自媒体工作台」了。</span></li>
+        </ol>
+        <details>
+          <summary>不用终端：在 DeepSeek Harness 的插件页里安装</summary>
+          <p>打开 DeepSeek Harness 侧栏的「插件」→「添加插件」，输入包名 <code class="in">dsh-media-desk</code>，点安装。</p>
+          <p>或者把下面这条索引地址加到「发现」里（要先在「实验性插件」里打开「自定义插件索引」），之后在列表里点安装，更新也是点一下：</p>
+          <div class="cmd"><code>https://raw.githubusercontent.com/woniuniuniu/dsh-media-desk/main/index.json</code><button class="copy" type="button">复制</button></div>
+        </details>
+      </div>
+    </article>
+
+    <article class="way">
+      <div class="num">2</div>
+      <div>
+        <h3>方法二：把 GitHub 链接发给 DeepSeek Harness</h3>
+        <p class="who">让它自己读安装说明，替你装。</p>
+      </div>
+      <div class="body">
+        <ol class="steps">
+          <li>在 DeepSeek Harness 里开一个新会话。</li>
+          <li>把这句话发给它：
+            <div class="say"><p id="say">帮我安装这个插件：https://github.com/woniuniuniu/dsh-media-desk</p><button class="copy" type="button" data-copy="#say">复制</button></div>
+          </li>
+          <li>等它装完，按它说的重启 DeepSeek Harness。</li>
+        </ol>
+      </div>
+    </article>
+
+    <article class="way">
+      <div class="num">3</div>
+      <div>
+        <h3>方法三：下载安装包再装</h3>
+        <p class="who">适合连不上 npm 的情况。</p>
+      </div>
+      <div class="body">
+        <ol class="steps">
+          <li>下载最新的安装包（一个 <code class="in">.tgz</code> 文件），放到一个以后不会动的文件夹里。<br>
+            <a class="btn" href="https://github.com/woniuniuniu/dsh-media-desk/releases/latest">去下载安装包 →</a>
+          </li>
+          <li>在终端里进到那个文件夹，粘贴这一行，回车<span data-when="desktop">（桌面版同样要先 ⌘Q 退出）</span>：
+            <div class="cmd"><code><span class="p">$ </span><span data-cmd="file">dsh plugin --profile desktop add "file:$PWD/dsh-media-desk-2.7.2.tgz"</span></code><button class="copy" type="button">复制</button></div>
+          </li>
+          <li><span data-when="desktop">重新打开 DeepSeek Harness。</span><span data-when="web" hidden>重新启动 <code class="in">dsh web</code>。</span></li>
+        </ol>
+      </div>
+    </article>
+
+  </div>
+
+  <div class="note">
+    <b>可能遇到的问题</b>
+    <ul>
+      <li>终端说找不到 <code>dsh</code>：在桌面版的菜单里选「管理 dsh 命令」，注册一下再试。</li>
+      <li>想卸载：把命令里的 <code>add</code> 换成 <code>remove</code>。你的内容一直存在 <code>~/.dsh/media-desk/</code>，不会跟着删。</li>
+    </ul>
+  </div>
+</section>
+
+<section id="features">
+  <h2>装好以后是什么样</h2>
+  <p class="sub">侧栏里会多一个「自媒体工作台」，里面有五个页面。第一次打开看到的是示例内容，右上角可以清空。</p>
+
+  <div class="feat">
+    <div class="txt"><div class="tag">成稿</div><h3>把一条灵感写成一篇稿子</h3><p>点开一条灵感，点「一键成稿」，它会写出标题和脚本，画出封面、配图和六格分镜。哪里不满意，在左边打字告诉它，右边就会改；改错了可以撤销。</p></div>
+    <picture class="pic"><source media="(prefers-color-scheme:dark)" srcset="assets/f-studio-dark.webp"><img loading="lazy" src="assets/f-studio-light.webp" width="2560" height="1600" alt="成稿工作区"></picture>
+  </div>
+  <div class="feat">
+    <div class="txt"><div class="tag">灵感</div><h3>记灵感的地方</h3><p>文字、链接、图片、视频都可以贴进来，每条是一张卡片。记新灵感的时候，以前内容相近的卡片会排到它旁边。</p></div>
+    <picture class="pic"><source media="(prefers-color-scheme:dark)" srcset="assets/f-home-dark.webp"><img loading="lazy" src="assets/f-home-light.webp" width="2560" height="1000" alt="灵感墙"></picture>
+  </div>
+  <div class="feat">
+    <div class="txt"><div class="tag">排期</div><h3>安排哪天发</h3><p>写好的稿子拖到日历上的某一天，就排好了。右上角显示下一条要发的是哪篇。</p></div>
+    <picture class="pic"><source media="(prefers-color-scheme:dark)" srcset="assets/f-schedule-dark.webp"><img loading="lazy" src="assets/f-schedule-light.webp" width="2560" height="1600" alt="排期日历"></picture>
+  </div>
+  <div class="feat">
+    <div class="txt"><div class="tag">复盘</div><h3>发完看数据</h3><p>把播放、点赞这些数据录进来（手动填、贴表格，或者导入自己的账号），能看到趋势和哪篇表现最好。它给的建议可以存成写作规则，以后写稿会照着来。</p></div>
+    <picture class="pic"><source media="(prefers-color-scheme:dark)" srcset="assets/f-insights-dark.webp"><img loading="lazy" src="assets/f-insights-light.webp" width="2560" height="1600" alt="复盘页"></picture>
+  </div>
+  <div class="feat">
+    <div class="txt"><div class="tag">风格</div><h3>选写稿的风格</h3><p>有 15 种现成的博主风格可以选。也可以贴几篇自己写过的稿子，让它学你的写法。</p></div>
+    <picture class="pic"><source media="(prefers-color-scheme:dark)" srcset="assets/f-style-dark.webp"><img loading="lazy" src="assets/f-style-light.webp" width="2560" height="1000" alt="风格页"></picture>
+  </div>
+</section>
+
+<section id="cost" style="padding-top:32px">
+  <h2>要花钱吗</h2>
+  <p class="sub">插件免费。但写稿和画图要用到模型，用的是你自己的账号和额度。</p>
+  <div class="cost">
+    <div><h3>写脚本</h3><p>用的是你在 DeepSeek Harness 里已经配好的模型。</p></div>
+    <div><h3>画封面和配图</h3><p>要填你自己的生图密钥，或者用 DSH 里已有的订阅生图。不配也能用，只是封面上只有文字。</p></div>
+    <div><h3>你的内容</h3><p>都存在你自己的电脑上，不上传，也不用注册账号。</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="farm">
+    <a href="https://bozhufarm.com"><img loading="lazy" src="assets/bozhufarm-woo.webp" width="640" height="640" alt="博主农场的农民蜗"></a>
+    <div>
+      <h3>不想自己配模型的话，可以用博主农场</h3>
+      <p>博主农场是我们做的网站，写稿和画图的模型都已经配好了，打开网页就能用。</p>
+      <a class="btn ghost" href="https://bozhufarm.com">打开 bozhufarm.com →</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="wrap">
+  <p>由小红书科技博主 <a href="https://www.xiaohongshu.com/user/profile/5faedce8000000000101c8a3">蜗牛的科技笔记</a> 开发 · <a href="https://github.com/woniuniuniu/dsh-media-desk">GitHub</a> · <a href="https://www.npmjs.com/package/dsh-media-desk">npm</a> · <a href="https://github.com/woniuniuniu/dsh-media-desk/issues">反馈问题</a></p>
+  <p>MIT 开源 · 社区插件，与 DeepSeek 无关。DeepSeek Harness 的名称和标识归其所有者所有。</p>
+</footer>
+
+<script>
+(function(){
+  var profile='desktop', version='2.7.2';
+  function render(){
+    document.querySelectorAll('[data-cmd="npm"]').forEach(function(el){
+      el.textContent='dsh plugin --profile '+profile+' add dsh-media-desk';
+    });
+    document.querySelectorAll('[data-cmd="file"]').forEach(function(el){
+      el.textContent='dsh plugin --profile '+profile+' add "file:$PWD/dsh-media-desk-'+version+'.tgz"';
+    });
+    document.querySelectorAll('[data-when]').forEach(function(el){
+      el.hidden = el.getAttribute('data-when')!==profile;
+    });
+    document.querySelectorAll('.switch button').forEach(function(b){
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-profile')===profile));
+    });
+    document.getElementById('ver').textContent='v'+version;
+  }
+  document.querySelectorAll('.switch button').forEach(function(b){
+    b.addEventListener('click',function(){profile=b.getAttribute('data-profile');render();});
+  });
+  document.querySelectorAll('.copy').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      var sel=btn.getAttribute('data-copy');
+      var src=sel?document.querySelector(sel):btn.parentNode.querySelector('code');
+      var text=src.textContent.replace(/^\$ /,'').trim();
+      function ok(){var t=btn.textContent;btn.textContent='已复制';btn.classList.add('done');
+        setTimeout(function(){btn.textContent=t;btn.classList.remove('done');},1500);}
+      if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(text).then(ok,fallback);}else{fallback();}
+      function fallback(){var ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';
+        document.body.appendChild(ta);ta.select();try{document.execCommand('copy');ok();}catch(e){}document.body.removeChild(ta);}
+    });
+  });
+  render();
+  // 版本号跟着 npm 上的最新发布走；取不到就用上面写的那个。
+  fetch('https://registry.npmjs.org/dsh-media-desk/latest').then(function(r){return r.ok?r.json():null;})
+    .then(function(j){if(j&&/^\d+\.\d+\.\d+/.test(j.version)){version=j.version;render();}}).catch(function(){});
+})();
+</script>
+</body>
+</html>
